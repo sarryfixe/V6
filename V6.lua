@@ -2,640 +2,1279 @@
 -- 🍉 SolRNG Watermelon V1
 -- by sarry_fixe
 --==================================================
+-- Chức năng:
+-- 🍉 Định vị dưa + chấm đỏ
+-- 🤖 Auto tìm và đi tới dưa
+-- 🚀 SubSpeed 1-100
+-- 🍋 Tự đi tới Lime
+-- 🗣️ Tự Talk với Lime
+-- 🎮 Tự chọn Minigame
+-- 🎟️ Minigame sẽ do hệ thống game xử lý Ticket
+-- 🖱️ Menu kéo được
+-- 👁️ Ẩn / hiện menu
+--==================================================
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local UIS = game:GetService("UserInputService")
+local UserInputService = game:GetService("UserInputService")
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 --==================================================
--- ⚙️ SETTINGS
+-- SETTINGS
 --==================================================
 
+local LIME_NAME = "Lime"
+
 local ESP_ENABLED = true
-local AUTO_WALK = false
+local AUTO_WATERMELON = false
+local AUTO_LIME = false
 
 local SUB_SPEED = 35
 local NORMAL_SPEED = 16
 
-local TOUCH_DISTANCE = 5
-local MOVE_DELAY = 0.12
-local SCAN_DELAY = 0.35
+local TOUCH_DISTANCE = 4.5
+local MOVE_INTERVAL = 0.12
+local SCAN_INTERVAL = 0.5
 
-local WatermelonKeywords = {
-    "watermelon",
-    "melon",
-    "dua",
-    "duahau",
-    "dưa",
-    "dưa hấu",
-    "dưahấu"
+local WATERMELON_KEYWORDS = {
+	"watermelon",
+	"melon",
+	"dua",
+	"duahau",
+	"dưa",
+	"dưa hấu",
+	"dưahấu"
 }
 
 --==================================================
--- 👤 CHARACTER
+-- CHARACTER
 --==================================================
 
 local Character
 local Humanoid
 local Root
 
-local function SetupCharacter(char)
-    Character = char
-    Humanoid = char:WaitForChild("Humanoid")
-    Root = char:WaitForChild("HumanoidRootPart")
+local function SetupCharacter(character)
+	Character = character
+	Humanoid = character:WaitForChild("Humanoid")
+	Root = character:WaitForChild("HumanoidRootPart")
 end
 
 if Player.Character then
-    task.spawn(SetupCharacter, Player.Character)
+	task.spawn(SetupCharacter, Player.Character)
 end
 
-Player.CharacterAdded:Connect(function(char)
-    task.wait(0.5)
-    SetupCharacter(char)
+Player.CharacterAdded:Connect(function(character)
+	task.wait(0.5)
+	SetupCharacter(character)
 end)
 
 --==================================================
--- 🔎 CHECK WATERMELON
+-- OBJECT PART
 --==================================================
 
-local function IsWatermelon(obj)
-    if not obj then
-        return false
-    end
+local function GetPart(object)
+	if not object then
+		return nil
+	end
 
-    local name = string.lower(obj.Name)
+	if object:IsA("BasePart") then
+		return object
+	end
 
-    for _, keyword in ipairs(WatermelonKeywords) do
-        if string.find(name, keyword, 1, true) then
-            return true
-        end
-    end
+	if object:IsA("Model") then
+		if object.PrimaryPart then
+			return object.PrimaryPart
+		end
 
-    return false
+		return object:FindFirstChildWhichIsA(
+			"BasePart",
+			true
+		)
+	end
+
+	return object:FindFirstChildWhichIsA(
+		"BasePart",
+		true
+	)
 end
 
 --==================================================
--- 📍 GET PART
+-- WATERMELON DETECTION
 --==================================================
 
-local function GetPart(obj)
-    if not obj then
-        return nil
-    end
+local function IsWatermelon(object)
+	if not object then
+		return false
+	end
 
-    if obj:IsA("BasePart") then
-        return obj
-    end
+	local name = string.lower(object.Name)
 
-    if obj:IsA("Model") then
-        if obj.PrimaryPart then
-            return obj.PrimaryPart
-        end
+	for _, keyword in ipairs(WATERMELON_KEYWORDS) do
+		if string.find(name, keyword, 1, true) then
+			return true
+		end
+	end
 
-        return obj:FindFirstChildWhichIsA("BasePart", true)
-    end
-
-    return obj:FindFirstChildWhichIsA("BasePart", true)
+	return false
 end
 
 --==================================================
--- 🍉 ESP
+-- ESP
 --==================================================
 
-local function RemoveESP(obj)
-    if not obj then
-        return
-    end
+local function RemoveESP(object)
+	if not object then
+		return
+	end
 
-    local h = obj:FindFirstChild("WatermelonESP")
-    if h then
-        h:Destroy()
-    end
+	local highlight = object:FindFirstChild(
+		"WatermelonESP"
+	)
 
-    local d = obj:FindFirstChild("WatermelonDot")
-    if d then
-        d:Destroy()
-    end
+	if highlight then
+		highlight:Destroy()
+	end
+
+	local dot = object:FindFirstChild(
+		"WatermelonDot"
+	)
+
+	if dot then
+		dot:Destroy()
+	end
 end
 
-local function AddESP(obj)
-    if not ESP_ENABLED then
-        return
-    end
+local function AddESP(object)
+	if not ESP_ENABLED then
+		return
+	end
 
-    if not obj or not obj:IsDescendantOf(Workspace) then
-        return
-    end
+	if not object:IsDescendantOf(Workspace) then
+		return
+	end
 
-    local part = GetPart(obj)
+	local part = GetPart(object)
 
-    if not part then
-        return
-    end
+	if not part then
+		return
+	end
 
-    -- Highlight
-    if not obj:FindFirstChild("WatermelonESP") then
-        local highlight = Instance.new("Highlight")
+	-- Highlight
+	if not object:FindFirstChild("WatermelonESP") then
 
-        highlight.Name = "WatermelonESP"
-        highlight.Adornee = obj
-        highlight.FillTransparency = 0.65
-        highlight.OutlineTransparency = 0
-        highlight.FillColor = Color3.fromRGB(255, 0, 0)
-        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+		local highlight = Instance.new("Highlight")
 
-        highlight.Parent = obj
-    end
+		highlight.Name = "WatermelonESP"
+		highlight.Adornee = object
 
-    -- 🔴 Dot
-    if not obj:FindFirstChild("WatermelonDot") then
-        local gui = Instance.new("BillboardGui")
+		highlight.FillTransparency = 0.65
+		highlight.OutlineTransparency = 0
 
-        gui.Name = "WatermelonDot"
-        gui.Adornee = part
-        gui.Size = UDim2.fromOffset(16, 16)
-        gui.StudsOffset = Vector3.new(0, 3, 0)
-        gui.AlwaysOnTop = true
+		highlight.FillColor =
+			Color3.fromRGB(255, 0, 0)
 
-        gui.Parent = obj
+		highlight.OutlineColor =
+			Color3.fromRGB(255, 255, 255)
 
-        local dot = Instance.new("Frame")
+		highlight.DepthMode =
+			Enum.HighlightDepthMode.AlwaysOnTop
 
-        dot.Size = UDim2.fromScale(1, 1)
-        dot.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-        dot.BorderSizePixel = 0
+		highlight.Parent = object
+	end
 
-        dot.Parent = gui
+	-- Red dot
+	if not object:FindFirstChild("WatermelonDot") then
 
-        local corner = Instance.new("UICorner")
+		local billboard = Instance.new(
+			"BillboardGui"
+		)
 
-        corner.CornerRadius = UDim.new(1, 0)
-        corner.Parent = dot
-    end
+		billboard.Name = "WatermelonDot"
+		billboard.Adornee = part
+
+		billboard.Size =
+			UDim2.fromOffset(16, 16)
+
+		billboard.StudsOffset =
+			Vector3.new(0, 3, 0)
+
+		billboard.AlwaysOnTop = true
+		billboard.Parent = object
+
+		local dot = Instance.new("Frame")
+
+		dot.Size = UDim2.fromScale(1, 1)
+
+		dot.BackgroundColor3 =
+			Color3.fromRGB(255, 0, 0)
+
+		dot.BorderSizePixel = 0
+		dot.Parent = billboard
+
+		local corner = Instance.new("UICorner")
+
+		corner.CornerRadius =
+			UDim.new(1, 0)
+
+		corner.Parent = dot
+	end
 end
 
 --==================================================
--- 🔍 SCAN
+-- SCAN WATERMELONS
 --==================================================
 
-local function ScanWatermelons()
-    local list = {}
+local function GetWatermelons()
+	local result = {}
 
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if IsWatermelon(obj) then
-            local part = GetPart(obj)
+	for _, object in ipairs(
+		Workspace:GetDescendants()
+	) do
 
-            if part then
-                table.insert(list, obj)
+		if IsWatermelon(object) then
 
-                if ESP_ENABLED then
-                    AddESP(obj)
-                end
-            end
-        end
-    end
+			local part = GetPart(object)
 
-    return list
+			if part then
+				table.insert(result, object)
+
+				if ESP_ENABLED then
+					AddESP(object)
+				end
+			end
+		end
+	end
+
+	return result
 end
 
-Workspace.DescendantAdded:Connect(function(obj)
-    task.wait(0.05)
+Workspace.DescendantAdded:Connect(function(object)
 
-    if IsWatermelon(obj) then
-        if ESP_ENABLED then
-            AddESP(obj)
-        end
-    end
+	task.wait(0.05)
+
+	if IsWatermelon(object)
+	and ESP_ENABLED then
+
+		AddESP(object)
+	end
 end)
 
 --==================================================
--- 🎯 NEAREST WATERMELON
+-- NEAREST WATERMELON
 --==================================================
+
+local CurrentWatermelon = nil
 
 local function GetNearestWatermelon()
-    if not Root then
-        return nil
-    end
+	if not Root then
+		return nil
+	end
 
-    local nearest
-    local nearestDistance = math.huge
+	local nearest = nil
+	local nearestDistance = math.huge
 
-    for _, obj in ipairs(ScanWatermelons()) do
-        if obj and obj:IsDescendantOf(Workspace) then
+	for _, object in ipairs(
+		GetWatermelons()
+	) do
 
-            local part = GetPart(obj)
+		if object:IsDescendantOf(Workspace) then
 
-            if part then
-                local distance =
-                    (Root.Position - part.Position).Magnitude
+			local part = GetPart(object)
 
-                if distance < nearestDistance then
-                    nearestDistance = distance
-                    nearest = obj
-                end
-            end
-        end
-    end
+			if part then
 
-    return nearest
+				local distance =
+					(Root.Position - part.Position).Magnitude
+
+				if distance < nearestDistance then
+
+					nearestDistance = distance
+					nearest = object
+
+				end
+			end
+		end
+	end
+
+	return nearest
 end
 
 --==================================================
--- 🚀 SET SPEED
+-- SPEED
 --==================================================
 
-local function ApplySpeed()
-    if not Humanoid then
-        return
-    end
+local function SetNormalSpeed()
+	if Humanoid then
+		Humanoid.WalkSpeed = NORMAL_SPEED
+	end
+end
 
-    if AUTO_WALK then
-        Humanoid.WalkSpeed = math.clamp(
-            SUB_SPEED,
-            1,
-            100
-        )
-    else
-        Humanoid.WalkSpeed = NORMAL_SPEED
-    end
+local function SetSubSpeed()
+	if Humanoid then
+		Humanoid.WalkSpeed =
+			math.clamp(
+				SUB_SPEED,
+				1,
+				100
+			)
+	end
 end
 
 --==================================================
--- 🍉 AUTO WALK
+-- MOVE TO
 --==================================================
 
-local CurrentTarget = nil
+local function MoveToPosition(
+	position,
+	speed
+)
+	if not Humanoid or not Root then
+		return false
+	end
 
-local function AutoWalkLoop()
-    while AUTO_WALK do
+	Humanoid.WalkSpeed = speed
 
-        if not Character
-        or not Humanoid
-        or not Root
-        or Humanoid.Health <= 0 then
+	Humanoid:MoveTo(position)
 
-            task.wait(0.5)
-            continue
-        end
+	while Humanoid
+	and Root
+	and Humanoid.Health > 0 do
 
-        -- Luôn giữ speed người dùng chọn
-        Humanoid.WalkSpeed = math.clamp(
-            SUB_SPEED,
-            1,
-            100
-        )
+		local distance =
+			(Root.Position - position).Magnitude
 
-        -- Nếu target cũ không còn tồn tại
-        if not CurrentTarget
-        or not CurrentTarget:IsDescendantOf(Workspace) then
+		if distance <= TOUCH_DISTANCE then
+			return true
+		end
 
-            CurrentTarget = GetNearestWatermelon()
-        end
+		Humanoid:MoveTo(position)
 
-        if CurrentTarget then
+		task.wait(MOVE_INTERVAL)
+	end
 
-            local part = GetPart(CurrentTarget)
-
-            if part then
-
-                local distance =
-                    (Root.Position - part.Position).Magnitude
-
-                -- Đã tới dưa
-                if distance <= TOUCH_DISTANCE then
-
-                    -- Đứng sát để game nhận touch
-                    Humanoid:MoveTo(part.Position)
-
-                    task.wait(0.2)
-
-                    -- Nếu dưa vẫn còn thì bỏ target
-                    if CurrentTarget
-                    and CurrentTarget:IsDescendantOf(Workspace) then
-
-                        CurrentTarget = nil
-                    end
-
-                else
-
-                    -- Đi thẳng tới dưa
-                    Humanoid:MoveTo(part.Position)
-                end
-
-            else
-                CurrentTarget = nil
-            end
-
-        else
-            task.wait(SCAN_DELAY)
-        end
-
-        task.wait(MOVE_DELAY)
-    end
-
-    CurrentTarget = nil
-
-    if Humanoid then
-        Humanoid.WalkSpeed = NORMAL_SPEED
-    end
+	return false
 end
 
 --==================================================
--- 🎨 GUI
+-- AUTO WATERMELON
 --==================================================
 
-local ScreenGui = Instance.new("ScreenGui")
+task.spawn(function()
 
-ScreenGui.Name = "SolRNG_Watermelon_V1"
+	while true do
+
+		if AUTO_WATERMELON
+		and not AUTO_LIME
+		and Humanoid
+		and Root
+		and Humanoid.Health > 0 then
+
+			SetSubSpeed()
+
+			if not CurrentWatermelon
+			or not CurrentWatermelon:IsDescendantOf(
+				Workspace
+			) then
+
+				CurrentWatermelon =
+					GetNearestWatermelon()
+			end
+
+			if CurrentWatermelon then
+
+				local part =
+					GetPart(CurrentWatermelon)
+
+				if part then
+
+					local distance =
+						(
+							Root.Position -
+							part.Position
+						).Magnitude
+
+					if distance <= TOUCH_DISTANCE then
+
+						-- đứng sát dưa
+						Humanoid:MoveTo(
+							part.Position
+						)
+
+						task.wait(0.15)
+
+						-- Nếu game phá dưa
+						-- bằng Touch thì ở đây
+						-- nhân vật đã chạm dưa.
+
+						if not CurrentWatermelon
+						:IsDescendantOf(Workspace) then
+
+							CurrentWatermelon = nil
+
+						else
+
+							-- kiểm tra lại
+							CurrentWatermelon =
+								GetNearestWatermelon()
+						end
+
+					else
+
+						Humanoid:MoveTo(
+							part.Position
+						)
+
+					end
+
+				else
+					CurrentWatermelon = nil
+				end
+
+			else
+				task.wait(SCAN_INTERVAL)
+			end
+
+		else
+			task.wait(0.2)
+		end
+
+		task.wait(MOVE_INTERVAL)
+	end
+end)
+
+--==================================================
+-- FIND LIME
+--==================================================
+
+local function FindLime()
+
+	for _, object in ipairs(
+		Workspace:GetDescendants()
+	) do
+
+		if string.lower(object.Name)
+			== string.lower(LIME_NAME) then
+
+			if object:IsA("Model")
+			or object:IsA("BasePart") then
+
+				return object
+			end
+		end
+	end
+
+	return nil
+end
+
+--==================================================
+-- FIND PROXIMITY PROMPT
+--==================================================
+
+local function FindPrompt(object)
+
+	if not object then
+		return nil
+	end
+
+	return object:FindFirstChildWhichIsA(
+		"ProximityPrompt",
+		true
+	)
+end
+
+--==================================================
+-- TALK TO LIME
+--==================================================
+
+local function TalkToLime()
+
+	local lime = FindLime()
+
+	if not lime then
+		return false
+	end
+
+	local part = GetPart(lime)
+
+	if not part then
+		return false
+	end
+
+	SetNormalSpeed()
+
+	local reached =
+		MoveToPosition(
+			part.Position,
+			NORMAL_SPEED
+		)
+
+	if not reached then
+		return false
+	end
+
+	task.wait(0.5)
+
+	local prompt =
+		FindPrompt(lime)
+
+	if prompt then
+
+		-- Khi prompt ở gần, Roblox sẽ
+		-- cho phép người chơi kích hoạt
+		-- bằng Input nếu Prompt được thiết kế
+		-- trong game của bạn.
+
+		if prompt.Enabled then
+
+			prompt:InputHoldBegin()
+
+			task.wait(
+				math.max(
+					prompt.HoldDuration,
+					0.1
+				)
+			)
+
+			prompt:InputHoldEnd()
+
+			return true
+		end
+	end
+
+	return false
+end
+
+--==================================================
+-- FIND GUI BUTTON BY TEXT / NAME
+--==================================================
+
+local function FindButton(keywords)
+
+	for _, object in ipairs(
+		PlayerGui:GetDescendants()
+	) do
+
+		if object:IsA("TextButton")
+		or object:IsA("ImageButton") then
+
+			local name =
+				string.lower(object.Name)
+
+			local text = ""
+
+			if object:IsA("TextButton") then
+				text =
+					string.lower(
+						object.Text or ""
+					)
+			end
+
+			for _, keyword in ipairs(
+				keywords
+			) do
+
+				keyword =
+					string.lower(keyword)
+
+				if string.find(
+					name,
+					keyword,
+					1,
+					true
+				)
+				or string.find(
+					text,
+					keyword,
+					1,
+					true
+				) then
+
+					return object
+				end
+			end
+		end
+	end
+
+	return nil
+end
+
+--==================================================
+-- CLICK GUI BUTTON
+--==================================================
+
+local function ActivateButton(button)
+
+	if not button then
+		return false
+	end
+
+	if button:IsA("GuiButton") then
+
+		button:Activate()
+
+		return true
+	end
+
+	return false
+end
+
+--==================================================
+-- MINIGAME BUTTON
+--==================================================
+
+local function ClickMinigame()
+
+	-- ảnh của bạn cho thấy:
+	-- [ Minigame ]
+
+	local button =
+		FindButton({
+			"minigame",
+			"mini game",
+			"mini-game"
+		})
+
+	if button then
+
+		ActivateButton(button)
+
+		task.wait(1)
+
+		return true
+	end
+
+	return false
+end
+
+--==================================================
+-- AUTO LIME
+--==================================================
+
+local LimeBusy = false
+
+local function RunLime()
+
+	if LimeBusy then
+		return
+	end
+
+	LimeBusy = true
+
+	-- Dừng auto dưa
+	CurrentWatermelon = nil
+
+	-- Đi Lime + Talk
+	local talked =
+		TalkToLime()
+
+	if talked then
+
+		task.wait(0.8)
+
+		-- Bấm Minigame
+		ClickMinigame()
+
+		task.wait(1)
+
+	end
+
+	LimeBusy = false
+end
+
+--==================================================
+-- AUTO LIME LOOP
+--==================================================
+
+task.spawn(function()
+
+	while true do
+
+		if AUTO_LIME then
+
+			RunLime()
+
+		else
+
+			task.wait(0.3)
+
+		end
+
+		task.wait(0.5)
+	end
+end)
+
+--==================================================
+-- GUI
+--==================================================
+
+local ScreenGui =
+	Instance.new("ScreenGui")
+
+ScreenGui.Name =
+	"SolRNG_Watermelon_V1"
+
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = PlayerGui
 
 --==================================================
--- 📦 MAIN MENU
+-- MAIN
 --==================================================
 
-local Main = Instance.new("Frame")
+local Main =
+	Instance.new("Frame")
 
-Main.Size = UDim2.fromOffset(285, 315)
-Main.Position = UDim2.new(0.5, -142, 0.5, -157)
+Main.Size =
+	UDim2.fromOffset(290, 360)
 
-Main.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+Main.Position =
+	UDim2.new(
+		0.5,
+		-145,
+		0.5,
+		-180
+	)
+
+Main.BackgroundColor3 =
+	Color3.fromRGB(
+		25,
+		25,
+		30
+	)
+
 Main.BorderSizePixel = 0
-
 Main.Parent = ScreenGui
 
-local MainCorner = Instance.new("UICorner")
+local MainCorner =
+	Instance.new("UICorner")
 
-MainCorner.CornerRadius = UDim.new(0, 12)
+MainCorner.CornerRadius =
+	UDim.new(0, 12)
+
 MainCorner.Parent = Main
 
 --==================================================
--- 🏷️ TITLE
+-- TITLE
 --==================================================
 
-local Title = Instance.new("TextLabel")
+local Title =
+	Instance.new("TextLabel")
 
-Title.Size = UDim2.new(1, -45, 0, 38)
-Title.Position = UDim2.fromOffset(12, 2)
+Title.Size =
+	UDim2.new(
+		1,
+		-50,
+		0,
+		38
+	)
+
+Title.Position =
+	UDim2.fromOffset(12, 2)
 
 Title.BackgroundTransparency = 1
 
-Title.Text = "🍉 SolRNG Watermelon V1"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 17
-Title.Font = Enum.Font.GothamBold
+Title.Text =
+	"🍉 SolRNG Watermelon V1"
 
-Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.TextColor3 =
+	Color3.fromRGB(
+		255,
+		255,
+		255
+	)
+
+Title.TextSize = 17
+Title.Font =
+	Enum.Font.GothamBold
+
+Title.TextXAlignment =
+	Enum.TextXAlignment.Left
 
 Title.Parent = Main
 
 --==================================================
--- 💳 CREDIT
+-- CREDIT
 --==================================================
 
-local Credit = Instance.new("TextLabel")
+local Credit =
+	Instance.new("TextLabel")
 
-Credit.Size = UDim2.new(1, -20, 0, 20)
-Credit.Position = UDim2.fromOffset(12, 35)
+Credit.Size =
+	UDim2.new(
+		1,
+		-20,
+		0,
+		20
+	)
+
+Credit.Position =
+	UDim2.fromOffset(12, 35)
 
 Credit.BackgroundTransparency = 1
 
-Credit.Text = "by sarry_fixe"
-Credit.TextColor3 = Color3.fromRGB(160, 160, 160)
-Credit.TextSize = 11
-Credit.Font = Enum.Font.Gotham
+Credit.Text =
+	"by sarry_fixe"
 
-Credit.TextXAlignment = Enum.TextXAlignment.Left
+Credit.TextColor3 =
+	Color3.fromRGB(
+		160,
+		160,
+		160
+	)
+
+Credit.TextSize = 11
+Credit.Font =
+	Enum.Font.Gotham
+
+Credit.TextXAlignment =
+	Enum.TextXAlignment.Left
 
 Credit.Parent = Main
 
 --==================================================
--- ➖ HIDE
+-- HIDE
 --==================================================
 
-local Hide = Instance.new("TextButton")
+local Hide =
+	Instance.new("TextButton")
 
-Hide.Size = UDim2.fromOffset(30, 30)
-Hide.Position = UDim2.new(1, -37, 0, 7)
+Hide.Size =
+	UDim2.fromOffset(30, 30)
 
-Hide.BackgroundColor3 = Color3.fromRGB(45, 45, 52)
+Hide.Position =
+	UDim2.new(
+		1,
+		-37,
+		0,
+		7
+	)
+
+Hide.BackgroundColor3 =
+	Color3.fromRGB(
+		45,
+		45,
+		52
+	)
 
 Hide.Text = "−"
-Hide.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+Hide.TextColor3 =
+	Color3.fromRGB(
+		255,
+		255,
+		255
+	)
+
 Hide.TextSize = 20
-Hide.Font = Enum.Font.GothamBold
+Hide.Font =
+	Enum.Font.GothamBold
 
 Hide.Parent = Main
 
-local HideCorner = Instance.new("UICorner")
+local function MakeCorner(object)
+	local corner =
+		Instance.new("UICorner")
 
-HideCorner.CornerRadius = UDim.new(0, 8)
-HideCorner.Parent = Hide
+	corner.CornerRadius =
+		UDim.new(0, 8)
 
---==================================================
--- 🍉 ESP BUTTON
---==================================================
-
-local ESPButton = Instance.new("TextButton")
-
-ESPButton.Size = UDim2.new(1, -24, 0, 42)
-ESPButton.Position = UDim2.fromOffset(12, 65)
-
-ESPButton.BackgroundColor3 = Color3.fromRGB(45, 45, 52)
-
-ESPButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-ESPButton.TextSize = 14
-ESPButton.Font = Enum.Font.GothamBold
-
-ESPButton.Parent = Main
-
-local ESPCorner = Instance.new("UICorner")
-
-ESPCorner.CornerRadius = UDim.new(0, 8)
-ESPCorner.Parent = ESPButton
-
-local function UpdateESP()
-    ESPButton.Text =
-        "🍉 Định vị dưa: " ..
-        (ESP_ENABLED and "ON" or "OFF")
+	corner.Parent = object
 end
 
-UpdateESP()
-
-ESPButton.MouseButton1Click:Connect(function()
-
-    ESP_ENABLED = not ESP_ENABLED
-
-    if ESP_ENABLED then
-        ScanWatermelons()
-    else
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if IsWatermelon(obj) then
-                RemoveESP(obj)
-            end
-        end
-    end
-
-    UpdateESP()
-end)
+MakeCorner(Hide)
 
 --==================================================
--- 🤖 AUTO BUTTON
+-- BUTTON CREATOR
 --==================================================
 
-local AutoButton = Instance.new("TextButton")
+local function CreateButton(
+	text,
+	y
+)
 
-AutoButton.Size = UDim2.new(1, -24, 0, 42)
-AutoButton.Position = UDim2.fromOffset(12, 113)
+	local button =
+		Instance.new("TextButton")
 
-AutoButton.BackgroundColor3 = Color3.fromRGB(45, 45, 52)
+	button.Size =
+		UDim2.new(
+			1,
+			-24,
+			0,
+			42
+		)
 
-AutoButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-AutoButton.TextSize = 14
-AutoButton.Font = Enum.Font.GothamBold
+	button.Position =
+		UDim2.fromOffset(
+			12,
+			y
+		)
 
-AutoButton.Parent = Main
+	button.BackgroundColor3 =
+		Color3.fromRGB(
+			45,
+			45,
+			52
+		)
 
-local AutoCorner = Instance.new("UICorner")
+	button.TextColor3 =
+		Color3.fromRGB(
+			255,
+			255,
+			255
+		)
 
-AutoCorner.CornerRadius = UDim.new(0, 8)
-AutoCorner.Parent = AutoButton
+	button.TextSize = 14
 
-local function UpdateAuto()
-    AutoButton.Text =
-        "🤖 Auto tìm dưa: " ..
-        (AUTO_WALK and "ON" or "OFF")
+	button.Font =
+		Enum.Font.GothamBold
+
+	button.Text = text
+
+	button.Parent = Main
+
+	MakeCorner(button)
+
+	return button
 end
 
-UpdateAuto()
-
-AutoButton.MouseButton1Click:Connect(function()
-
-    AUTO_WALK = not AUTO_WALK
-
-    UpdateAuto()
-    ApplySpeed()
-
-    if AUTO_WALK then
-        task.spawn(AutoWalkLoop)
-    end
-end)
-
 --==================================================
--- 🚀 SPEED
+-- ESP BUTTON
 --==================================================
 
-local SpeedLabel = Instance.new("TextLabel")
+local ESPButton =
+	CreateButton(
+		"🍉 Định vị dưa: ON",
+		65
+	)
 
-SpeedLabel.Size = UDim2.new(1, -24, 0, 25)
-SpeedLabel.Position = UDim2.fromOffset(12, 165)
+local function UpdateESPButton()
+
+	ESPButton.Text =
+		"🍉 Định vị dưa: " ..
+		(
+			ESP_ENABLED
+			and "ON"
+			or "OFF"
+		)
+end
+
+ESPButton.MouseButton1Click:Connect(
+	function()
+
+		ESP_ENABLED =
+			not ESP_ENABLED
+
+		if ESP_ENABLED then
+
+			GetWatermelons()
+
+		else
+
+			for _, object in ipairs(
+				Workspace:GetDescendants()
+			) do
+
+				if IsWatermelon(object) then
+					RemoveESP(object)
+				end
+			end
+		end
+
+		UpdateESPButton()
+	end
+)
+
+--==================================================
+-- AUTO WATERMELON BUTTON
+--==================================================
+
+local AutoWatermelonButton =
+	CreateButton(
+		"🤖 Auto tìm dưa: OFF",
+		113
+	)
+
+local function UpdateAutoWatermelon()
+
+	AutoWatermelonButton.Text =
+		"🤖 Auto tìm dưa: " ..
+		(
+			AUTO_WATERMELON
+			and "ON"
+			or "OFF"
+		)
+end
+
+AutoWatermelonButton.MouseButton1Click:Connect(
+	function()
+
+		AUTO_WATERMELON =
+			not AUTO_WATERMELON
+
+		if AUTO_WATERMELON then
+			AUTO_LIME = false
+			CurrentWatermelon = nil
+		else
+			SetNormalSpeed()
+		end
+
+		UpdateAutoWatermelon()
+		UpdateAutoLime()
+	end
+)
+
+--==================================================
+-- LIME BUTTON
+--==================================================
+
+local AutoLimeButton =
+	CreateButton(
+		"🍋 Đi tới Lime: OFF",
+		161
+	)
+
+function UpdateAutoLime()
+
+	AutoLimeButton.Text =
+		"🍋 Đi tới Lime: " ..
+		(
+			AUTO_LIME
+			and "ON"
+			or "OFF"
+		)
+end
+
+AutoLimeButton.MouseButton1Click:Connect(
+	function()
+
+		AUTO_LIME =
+			not AUTO_LIME
+
+		if AUTO_LIME then
+
+			-- Không chạy dưa cùng lúc
+			AUTO_WATERMELON = false
+			CurrentWatermelon = nil
+
+			SetNormalSpeed()
+
+		else
+
+			SetNormalSpeed()
+		end
+
+		UpdateAutoLime()
+		UpdateAutoWatermelon()
+	end
+)
+
+--==================================================
+-- SPEED LABEL
+--==================================================
+
+local SpeedLabel =
+	Instance.new("TextLabel")
+
+SpeedLabel.Size =
+	UDim2.new(
+		1,
+		-24,
+		0,
+		22
+	)
+
+SpeedLabel.Position =
+	UDim2.fromOffset(
+		12,
+		210
+	)
 
 SpeedLabel.BackgroundTransparency = 1
 
-SpeedLabel.Text = "🚀 SubSpeed — 1 đến 100"
-SpeedLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-SpeedLabel.TextSize = 13
-SpeedLabel.Font = Enum.Font.GothamBold
+SpeedLabel.Text =
+	"🚀 SubSpeed — 1 đến 100"
 
-SpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
+SpeedLabel.TextColor3 =
+	Color3.fromRGB(
+		255,
+		255,
+		255
+	)
+
+SpeedLabel.TextSize = 13
+
+SpeedLabel.Font =
+	Enum.Font.GothamBold
+
+SpeedLabel.TextXAlignment =
+	Enum.TextXAlignment.Left
 
 SpeedLabel.Parent = Main
 
 --==================================================
--- 🔢 SPEED BOX
+-- SPEED BOX
 --==================================================
 
-local SpeedBox = Instance.new("TextBox")
+local SpeedBox =
+	Instance.new("TextBox")
 
-SpeedBox.Size = UDim2.new(1, -24, 0, 42)
-SpeedBox.Position = UDim2.fromOffset(12, 192)
+SpeedBox.Size =
+	UDim2.new(
+		1,
+		-24,
+		0,
+		40
+	)
 
-SpeedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
+SpeedBox.Position =
+	UDim2.fromOffset(
+		12,
+		235
+	)
 
-SpeedBox.Text = tostring(SUB_SPEED)
-SpeedBox.PlaceholderText = "Nhập 1 - 100"
+SpeedBox.BackgroundColor3 =
+	Color3.fromRGB(
+		40,
+		40,
+		48
+	)
 
-SpeedBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-SpeedBox.PlaceholderColor3 = Color3.fromRGB(140, 140, 140)
+SpeedBox.Text =
+	tostring(SUB_SPEED)
+
+SpeedBox.PlaceholderText =
+	"Nhập tốc độ 1 - 100"
+
+SpeedBox.TextColor3 =
+	Color3.fromRGB(
+		255,
+		255,
+		255
+	)
 
 SpeedBox.TextSize = 14
-SpeedBox.Font = Enum.Font.GothamBold
+
+SpeedBox.Font =
+	Enum.Font.GothamBold
 
 SpeedBox.ClearTextOnFocus = false
 
 SpeedBox.Parent = Main
 
-local SpeedCorner = Instance.new("UICorner")
+MakeCorner(SpeedBox)
 
-SpeedCorner.CornerRadius = UDim.new(0, 8)
-SpeedCorner.Parent = SpeedBox
+SpeedBox.FocusLost:Connect(
+	function()
 
-SpeedBox.FocusLost:Connect(function()
+		local value =
+			tonumber(
+				SpeedBox.Text
+			)
 
-    local value = tonumber(SpeedBox.Text)
+		if not value then
 
-    if not value then
-        SpeedBox.Text = tostring(SUB_SPEED)
-        return
-    end
+			SpeedBox.Text =
+				tostring(SUB_SPEED)
 
-    value = math.floor(value)
+			return
+		end
 
-    value = math.clamp(
-        value,
-        1,
-        100
-    )
+		value =
+			math.clamp(
+				math.floor(value),
+				1,
+				100
+			)
 
-    SUB_SPEED = value
+		SUB_SPEED = value
 
-    SpeedBox.Text = tostring(SUB_SPEED)
+		SpeedBox.Text =
+			tostring(SUB_SPEED)
 
-    if AUTO_WALK and Humanoid then
-        Humanoid.WalkSpeed = SUB_SPEED
-    end
-end)
+		if AUTO_WATERMELON then
+			SetSubSpeed()
+		end
+	end
+)
 
 --==================================================
--- 📊 STATUS
+-- STATUS
 --==================================================
 
-local Status = Instance.new("TextLabel")
+local Status =
+	Instance.new("TextLabel")
 
-Status.Size = UDim2.new(1, -24, 0, 45)
-Status.Position = UDim2.fromOffset(12, 244)
+Status.Size =
+	UDim2.new(
+		1,
+		-24,
+		0,
+		42
+	)
 
-Status.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+Status.Position =
+	UDim2.fromOffset(
+		12,
+		285
+	)
 
-Status.TextColor3 = Color3.fromRGB(220, 220, 220)
+Status.BackgroundColor3 =
+	Color3.fromRGB(
+		35,
+		35,
+		42
+	)
+
+Status.TextColor3 =
+	Color3.fromRGB(
+		220,
+		220,
+		220
+	)
 
 Status.TextSize = 12
-Status.Font = Enum.Font.Gotham
+
+Status.Font =
+	Enum.Font.Gotham
 
 Status.TextWrapped = true
-Status.Text = "Status: IDLE"
+
+Status.Text =
+	"Status: IDLE"
 
 Status.Parent = Main
 
-local StatusCorner = Instance.new("UICorner")
-
-StatusCorner.CornerRadius = UDim.new(0, 8)
-StatusCorner.Parent = Status
+MakeCorner(Status)
 
 --==================================================
--- 👁️ SHOW BUTTON
+-- SHOW BUTTON
 --==================================================
 
-local Show = Instance.new("TextButton")
+local Show =
+	Instance.new("TextButton")
 
-Show.Size = UDim2.fromOffset(55, 55)
-Show.Position = UDim2.new(0, 15, 0.5, -27)
+Show.Size =
+	UDim2.fromOffset(
+		55,
+		55
+	)
 
-Show.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+Show.Position =
+	UDim2.new(
+		0,
+		15,
+		0.5,
+		-27
+	)
+
+Show.BackgroundColor3 =
+	Color3.fromRGB(
+		25,
+		25,
+		30
+	)
 
 Show.Text = "🍉"
 Show.TextSize = 27
@@ -644,132 +1283,175 @@ Show.Visible = false
 
 Show.Parent = ScreenGui
 
-local ShowCorner = Instance.new("UICorner")
+local ShowCorner =
+	Instance.new("UICorner")
 
-ShowCorner.CornerRadius = UDim.new(1, 0)
+ShowCorner.CornerRadius =
+	UDim.new(1, 0)
+
 ShowCorner.Parent = Show
 
-Hide.MouseButton1Click:Connect(function()
-    Main.Visible = false
-    Show.Visible = true
-end)
+Hide.MouseButton1Click:Connect(
+	function()
 
-Show.MouseButton1Click:Connect(function()
-    Main.Visible = true
-    Show.Visible = false
-end)
+		Main.Visible = false
+		Show.Visible = true
+	end
+)
+
+Show.MouseButton1Click:Connect(
+	function()
+
+		Main.Visible = true
+		Show.Visible = false
+	end
+)
 
 --==================================================
--- 🖱️ DRAG MENU
+-- DRAG MENU
 --==================================================
 
 local Dragging = false
 local DragStart
 local StartPosition
 
-Title.InputBegan:Connect(function(input)
+Title.InputBegan:Connect(
+	function(input)
 
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-    or input.UserInputType == Enum.UserInputType.Touch then
+		if input.UserInputType ==
+			Enum.UserInputType.MouseButton1
+			or input.UserInputType ==
+			Enum.UserInputType.Touch then
 
-        Dragging = true
+			Dragging = true
+			DragStart = input.Position
+			StartPosition =
+				Main.Position
+		end
+	end
+)
 
-        DragStart = input.Position
-        StartPosition = Main.Position
-    end
-end)
+UserInputService.InputChanged:Connect(
+	function(input)
 
-UIS.InputChanged:Connect(function(input)
+		if not Dragging then
+			return
+		end
 
-    if not Dragging then
-        return
-    end
+		if input.UserInputType ==
+			Enum.UserInputType.MouseMovement
+			or input.UserInputType ==
+			Enum.UserInputType.Touch then
 
-    if input.UserInputType == Enum.UserInputType.MouseMovement
-    or input.UserInputType == Enum.UserInputType.Touch then
+			local delta =
+				input.Position -
+				DragStart
 
-        local Delta =
-            input.Position - DragStart
+			Main.Position =
+				UDim2.new(
+					StartPosition.X.Scale,
+					StartPosition.X.Offset +
+						delta.X,
 
-        Main.Position = UDim2.new(
-            StartPosition.X.Scale,
-            StartPosition.X.Offset + Delta.X,
+					StartPosition.Y.Scale,
+					StartPosition.Y.Offset +
+						delta.Y
+				)
+		end
+	end
+)
 
-            StartPosition.Y.Scale,
-            StartPosition.Y.Offset + Delta.Y
-        )
-    end
-end)
+UserInputService.InputEnded:Connect(
+	function(input)
 
-UIS.InputEnded:Connect(function(input)
+		if input.UserInputType ==
+			Enum.UserInputType.MouseButton1
+			or input.UserInputType ==
+			Enum.UserInputType.Touch then
 
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-    or input.UserInputType == Enum.UserInputType.Touch then
-
-        Dragging = false
-    end
-end)
-
---==================================================
--- 📊 STATUS LOOP
---==================================================
-
-task.spawn(function()
-
-    while ScreenGui.Parent do
-
-        local target = "Không có"
-
-        if CurrentTarget
-        and CurrentTarget.Parent then
-
-            target = CurrentTarget.Name
-        end
-
-        Status.Text =
-            "Status: " ..
-            (AUTO_WALK and "AUTO" or "IDLE") ..
-            "\nDưa: " ..
-            target ..
-            " | Speed: " ..
-            tostring(SUB_SPEED)
-
-        task.wait(0.25)
-    end
-end)
+			Dragging = false
+		end
+	end
+)
 
 --==================================================
--- 🔄 ESP SCAN LOOP
+-- STATUS LOOP
 --==================================================
 
 task.spawn(function()
 
-    while ScreenGui.Parent do
+	while ScreenGui.Parent do
 
-        if ESP_ENABLED then
-            ScanWatermelons()
-        end
+		local target = "Không có"
 
-        task.wait(1)
-    end
+		if CurrentWatermelon
+		and CurrentWatermelon.Parent then
+
+			target =
+				CurrentWatermelon.Name
+		end
+
+		local state = "IDLE"
+
+		if AUTO_LIME then
+			state = "ĐANG TỚI LIME"
+		elseif AUTO_WATERMELON then
+			state = "ĐANG TÌM DƯA"
+		end
+
+		Status.Text =
+			"Status: " ..
+			state ..
+			"\nDưa: " ..
+			target ..
+			" | Speed: " ..
+			tostring(SUB_SPEED)
+
+		task.wait(0.25)
+	end
 end)
 
 --==================================================
--- 🧹 CLEANUP TARGET
+-- ESP SCAN LOOP
 --==================================================
 
-Workspace.DescendantRemoving:Connect(function(obj)
+task.spawn(function()
 
-    if obj == CurrentTarget then
-        CurrentTarget = nil
-    end
+	while ScreenGui.Parent do
+
+		if ESP_ENABLED then
+			GetWatermelons()
+		end
+
+		task.wait(1)
+	end
 end)
 
 --==================================================
--- 🚀 START
+-- CLEAN TARGET
 --==================================================
 
-ScanWatermelons()
+Workspace.DescendantRemoving:Connect(
+	function(object)
 
-print("🍉 SolRNG Watermelon V1 loaded")
-print("by sarry_fixe")
+		if object ==
+			CurrentWatermelon then
+
+			CurrentWatermelon = nil
+		end
+	end
+)
+
+--==================================================
+-- START
+--==================================================
+
+GetWatermelons()
+
+print(
+	"🍉 SolRNG Watermelon V1 loaded"
+)
+
+print(
+	"by sarry_fixe"
+)
