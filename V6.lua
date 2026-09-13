@@ -1,14 +1,6 @@
 --==================================================
--- 🍉 SolRNG ESP Watermelon V6
+-- 🍉 SolRNG Watermelon V8
 -- by sarry_fixe
---
--- FEATURES:
--- 👁️ ESP ON/OFF
--- 🎯 Center Dot
--- 🚀 FPS Boost
--- 🧭 Pathfinding
--- 🧱 Anti-Stuck
--- 🔄 Auto Target
 --==================================================
 
 local Players = game:GetService("Players")
@@ -21,918 +13,962 @@ local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 --==================================================
--- SETTINGS
+-- ⚙️ SETTINGS
 --==================================================
 
-local ESP_ENABLED = false
+local ESP_ENABLED = true
 local DOT_ENABLED = true
 local FPS_ENABLED = false
+
+local AUTO_QUEST = false
 local AUTO_WALK = false
 
-local TARGET_REACHED_DISTANCE = 7
-local REPATH_TIME = 0.35
+local LIME_NAME = "Lime"
 
--- Anti stuck
-local STUCK_CHECK_TIME = 1.0
-local STUCK_DISTANCE = 1.2
-
--- Path
-local AGENT_RADIUS = 2
-local AGENT_HEIGHT = 5
-local WAYPOINT_SPACING = 3
-
---==================================================
--- WATERMELON KEYWORDS
---==================================================
-
-local Keywords = {
+local WATERMELON_NAMES = {
     "watermelon",
     "melon",
     "dua",
     "duahau"
 }
 
---==================================================
--- DATA
---==================================================
+local QUEST_DISTANCE = 8
+local WATERMELON_TOUCH_DISTANCE = 5
 
-local Marked = {}
-
-local FPSBackup = {
-    GlobalShadows = nil,
-    FogEnd = nil,
-    Effects = {},
-    Particles = {},
-    Trails = {},
-    Beams = {},
-    TerrainDecoration = nil
-}
+local SCAN_INTERVAL = 0.8
+local REPATH_INTERVAL = 1.2
+local QUEST_COOLDOWN = 3
 
 --==================================================
--- WATERMELON CHECK
+-- 🧠 STATES
 --==================================================
 
-local function IsWatermelon(Object)
+local STATE_IDLE = "IDLE"
+local STATE_GET_QUEST = "GET QUEST"
+local STATE_FIND_WATERMELON = "FIND WATERMELON"
+local STATE_TOUCH_WATERMELON = "TOUCH WATERMELON"
 
-    if not Object then
+local ControllerState = STATE_IDLE
+
+local QuestReceived = false
+
+local CurrentTarget = nil
+local CurrentTargetPart = nil
+
+local CurrentPath = nil
+local CurrentWaypoints = {}
+local WaypointIndex = 1
+
+local LastPathTime = 0
+local LastQuestTime = 0
+local LastScanTime = 0
+
+--==================================================
+-- 👤 CHARACTER
+--==================================================
+
+local Character
+local Humanoid
+local RootPart
+
+local function SetupCharacter(char)
+
+    Character = char
+
+    Humanoid = char:WaitForChild("Humanoid", 10)
+    RootPart = char:WaitForChild("HumanoidRootPart", 10)
+
+    CurrentTarget = nil
+    CurrentTargetPart = nil
+
+    CurrentPath = nil
+    CurrentWaypoints = {}
+    WaypointIndex = 1
+end
+
+if Player.Character then
+    SetupCharacter(Player.Character)
+end
+
+Player.CharacterAdded:Connect(function(char)
+    task.wait(1)
+    SetupCharacter(char)
+end)
+
+local function IsAlive()
+
+    return Character
+        and Humanoid
+        and RootPart
+        and Humanoid.Health > 0
+end
+
+--==================================================
+-- 🔎 OBJECT HELPERS
+--==================================================
+
+local function GetObjectPart(obj)
+
+    if not obj then
+        return nil
+    end
+
+    if obj:IsA("BasePart") then
+        return obj
+    end
+
+    if obj:IsA("Model") then
+
+        if obj.PrimaryPart then
+            return obj.PrimaryPart
+        end
+
+        return obj:FindFirstChildWhichIsA(
+            "BasePart",
+            true
+        )
+    end
+
+    return obj:FindFirstChildWhichIsA(
+        "BasePart",
+        true
+    )
+end
+
+local function IsWatermelon(obj)
+
+    if not obj then
         return false
     end
 
-    local Name = string.lower(Object.Name)
+    local name = string.lower(obj.Name)
 
-    for _, Word in ipairs(Keywords) do
+    for _, keyword in ipairs(WATERMELON_NAMES) do
 
-        if string.find(Name, Word, 1, true) then
+        if string.find(
+            name,
+            keyword,
+            1,
+            true
+        ) then
+
             return true
         end
-
     end
 
     return false
 end
 
 --==================================================
--- GET PART
+-- 🍉 SCAN
 --==================================================
 
-local function GetPart(Object)
+local Watermelons = {}
 
-    if not Object then
-        return nil
-    end
+local function ScanWatermelons()
 
-    if Object:IsA("BasePart") then
-        return Object
-    end
+    table.clear(Watermelons)
 
-    if Object:IsA("Model") then
+    for _, obj in ipairs(
+        Workspace:GetDescendants()
+    ) do
 
-        if Object.PrimaryPart then
-            return Object.PrimaryPart
+        if IsWatermelon(obj) then
+
+            local part = GetObjectPart(obj)
+
+            if part then
+
+                table.insert(
+                    Watermelons,
+                    {
+                        Object = obj,
+                        Part = part
+                    }
+                )
+            end
         end
+    end
+end
 
-        return Object:FindFirstChildWhichIsA(
-            "BasePart",
-            true
-        )
+local function GetNearestWatermelon()
+
+    if not IsAlive() then
+        return nil, nil
+    end
+
+    local nearest
+    local nearestPart
+    local nearestDistance = math.huge
+
+    for _, data in ipairs(Watermelons) do
+
+        local obj = data.Object
+        local part = data.Part
+
+        if obj
+            and obj.Parent
+            and part
+            and part.Parent
+            and IsWatermelon(obj) then
+
+            local distance =
+                (RootPart.Position - part.Position).Magnitude
+
+            if distance < nearestDistance then
+
+                nearestDistance = distance
+                nearest = obj
+                nearestPart = part
+            end
+        end
+    end
+
+    return nearest, nearestPart
+end
+
+--==================================================
+-- 🍋 LIME
+--==================================================
+
+local function GetLime()
+
+    for _, obj in ipairs(
+        Workspace:GetDescendants()
+    ) do
+
+        if string.lower(obj.Name)
+            == string.lower(LIME_NAME) then
+
+            return obj
+        end
     end
 
     return nil
 end
 
---==================================================
--- ADD ESP
---==================================================
+local function GetLimePart()
 
-local function AddESP(Object)
+    local lime = GetLime()
 
-    if Marked[Object] then
-        return
-    end
-
-    local Part = GetPart(Object)
-
-    if not Part then
-        return
-    end
-
-    --==================================================
-    -- HIGHLIGHT
-    --==================================================
-
-    local Highlight = Instance.new("Highlight")
-
-    Highlight.Name = "WatermelonESP"
-    Highlight.Adornee = Object
-
-    Highlight.FillTransparency = 0.65
-    Highlight.OutlineTransparency = 0
-
-    -- Quan trọng: lấy đúng trạng thái hiện tại
-    Highlight.Enabled = ESP_ENABLED
-
-    Highlight.Parent = Object
-
-    --==================================================
-    -- CENTER DOT
-    --==================================================
-
-    local DotGui = Instance.new("BillboardGui")
-
-    DotGui.Name = "WatermelonCenterDot"
-    DotGui.Adornee = Part
-
-    DotGui.Size =
-        UDim2.fromOffset(12, 12)
-
-    DotGui.AlwaysOnTop = true
-    DotGui.LightInfluence = 0
-    DotGui.Enabled = DOT_ENABLED
-
-    DotGui.Parent = PlayerGui
-
-    local Dot = Instance.new("Frame")
-
-    Dot.Size = UDim2.fromScale(1, 1)
-
-    Dot.BackgroundColor3 =
-        Color3.fromRGB(255, 60, 60)
-
-    Dot.BorderSizePixel = 0
-    Dot.Parent = DotGui
-
-    local Corner = Instance.new("UICorner")
-
-    Corner.CornerRadius =
-        UDim.new(1, 0)
-
-    Corner.Parent = Dot
-
-    --==================================================
-    -- SAVE
-    --==================================================
-
-    Marked[Object] = {
-        Highlight = Highlight,
-        Dot = DotGui,
-        Part = Part
-    }
-end
-
---==================================================
--- SCAN
---==================================================
-
-local function ScanWatermelons()
-
-    for _, Object in ipairs(
-        Workspace:GetDescendants()
-    ) do
-
-        if IsWatermelon(Object) then
-            AddESP(Object)
-        end
-
-    end
-end
-
---==================================================
--- NEW OBJECT
---==================================================
-
-Workspace.DescendantAdded:Connect(function(Object)
-
-    task.wait(0.08)
-
-    if IsWatermelon(Object) then
-        AddESP(Object)
-    end
-end)
-
---==================================================
--- CLEAN
---==================================================
-
-local function CleanMarked()
-
-    for Object, Data in pairs(Marked) do
-
-        if not Object
-            or not Object.Parent
-            or not Data
-            or not Data.Part
-            or not Data.Part.Parent then
-
-            if Data then
-
-                if Data.Highlight then
-                    pcall(function()
-                        Data.Highlight:Destroy()
-                    end)
-                end
-
-                if Data.Dot then
-                    pcall(function()
-                        Data.Dot:Destroy()
-                    end)
-                end
-
-            end
-
-            Marked[Object] = nil
-        end
-
-    end
-end
-
---==================================================
--- CHARACTER
---==================================================
-
-local function GetCharacter()
-
-    local Character = Player.Character
-
-    if not Character then
-        return nil, nil, nil
-    end
-
-    local Humanoid =
-        Character:FindFirstChildOfClass(
-            "Humanoid"
-        )
-
-    local Root =
-        Character:FindFirstChild(
-            "HumanoidRootPart"
-        )
-
-    return Character, Humanoid, Root
-end
-
---==================================================
--- NEAREST WATERMELON
---==================================================
-
-local function GetNearestWatermelon()
-
-    local _, _, Root =
-        GetCharacter()
-
-    if not Root then
+    if not lime then
         return nil, nil
     end
 
-    local Nearest = nil
-    local NearestDistance = math.huge
-
-    for Object, Data in pairs(Marked) do
-
-        if Object
-            and Object.Parent
-            and Data
-            and Data.Part
-            and Data.Part.Parent then
-
-            local Distance =
-                (
-                    Root.Position -
-                    Data.Part.Position
-                ).Magnitude
-
-            if Distance < NearestDistance then
-
-                NearestDistance = Distance
-                Nearest = Object
-
-            end
-        end
-
-    end
-
-    return Nearest, NearestDistance
+    return lime, GetObjectPart(lime)
 end
 
 --==================================================
--- STOP
+-- 🛣️ PATH
 --==================================================
 
-local function StopMovement()
+local function ClearPath()
 
-    local _, Humanoid, Root =
-        GetCharacter()
-
-    if Humanoid and Root then
-
-        Humanoid:Move(Vector3.zero)
-
-        Humanoid:MoveTo(
-            Root.Position
-        )
-
-    end
+    CurrentPath = nil
+    CurrentWaypoints = {}
+    WaypointIndex = 1
 end
 
---==================================================
--- CREATE PATH
---==================================================
+local function CreatePath(destination)
 
-local function CreatePath(TargetPart)
-
-    local _, _, Root =
-        GetCharacter()
-
-    if not Root then
-        return nil
+    if not IsAlive() or not destination then
+        return false
     end
 
-    if not TargetPart
-        or not TargetPart.Parent then
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 2,
+        AgentHeight = 5,
+        AgentCanJump = true,
+        AgentCanClimb = true,
+        WaypointSpacing = 4
+    })
 
-        return nil
-    end
+    local success = pcall(function()
 
-    local Path
-
-    local Success = pcall(function()
-
-        Path =
-            PathfindingService:CreatePath({
-                AgentRadius = AGENT_RADIUS,
-                AgentHeight = AGENT_HEIGHT,
-                AgentCanJump = true,
-                AgentCanClimb = true,
-                WaypointSpacing = WAYPOINT_SPACING
-            })
-
-        Path:ComputeAsync(
-            Root.Position,
-            TargetPart.Position
+        path:ComputeAsync(
+            RootPart.Position,
+            destination
         )
-
     end)
 
-    if not Success then
-        return nil
+    if not success then
+        return false
     end
 
-    if not Path then
-        return nil
+    if path.Status ~= Enum.PathStatus.Success then
+        return false
     end
 
-    if Path.Status
-        ~= Enum.PathStatus.Success then
+    CurrentPath = path
+    CurrentWaypoints = path:GetWaypoints()
+    WaypointIndex = 1
+    LastPathTime = tick()
 
-        return nil
+    return #CurrentWaypoints > 0
+end
+
+local function MoveToPosition(destination)
+
+    if not IsAlive() then
+        return
     end
 
-    return Path
+    if not destination then
+        return
+    end
+
+    if not CurrentPath
+        or tick() - LastPathTime >= REPATH_INTERVAL then
+
+        CreatePath(destination)
+    end
+
+    if #CurrentWaypoints == 0 then
+
+        Humanoid:MoveTo(destination)
+
+        return
+    end
+
+    local waypoint =
+        CurrentWaypoints[WaypointIndex]
+
+    if not waypoint then
+
+        ClearPath()
+
+        return
+    end
+
+    if waypoint.Action
+        == Enum.PathWaypointAction.Jump then
+
+        Humanoid.Jump = true
+    end
+
+    Humanoid:MoveTo(waypoint.Position)
+
+    if
+        (RootPart.Position - waypoint.Position).Magnitude
+        <= 4
+    then
+
+        WaypointIndex += 1
+    end
 end
 
 --==================================================
--- FOLLOW PATH
+-- 🍋 TALK LIME
 --==================================================
 
-local function FollowPath(TargetPart)
+local function TalkToLime()
 
-    if not AUTO_WALK then
+    if not IsAlive() then
         return false
     end
 
-    if not TargetPart
-        or not TargetPart.Parent then
+    local lime, limePart =
+        GetLimePart()
 
+    if not limePart then
         return false
     end
 
-    local Path =
-        CreatePath(TargetPart)
+    local distance =
+        (RootPart.Position - limePart.Position).Magnitude
 
-    if not Path then
-        return false
-    end
+    if distance > QUEST_DISTANCE then
 
-    local Waypoints =
-        Path:GetWaypoints()
-
-    if #Waypoints == 0 then
-        return false
-    end
-
-    --==================================================
-    -- PATH BLOCKED
-    --==================================================
-
-    local PathBlocked = false
-
-    local BlockConnection =
-        Path.Blocked:Connect(function()
-            PathBlocked = true
-        end)
-
-    --==================================================
-    -- WAYPOINTS
-    --==================================================
-
-    for _, Waypoint in ipairs(Waypoints) do
-
-        if not AUTO_WALK then
-            break
-        end
-
-        if PathBlocked then
-            break
-        end
-
-        if not TargetPart.Parent then
-            break
-        end
-
-        local _, Humanoid, Root =
-            GetCharacter()
-
-        if not Humanoid
-            or not Root then
-
-            break
-        end
-
-        --==================================================
-        -- CHECK TARGET DISTANCE
-        --==================================================
-
-        local TargetDistance =
-            (
-                Root.Position -
-                TargetPart.Position
-            ).Magnitude
-
-        if TargetDistance
-            <= TARGET_REACHED_DISTANCE then
-
-            StopMovement()
-            break
-        end
-
-        --==================================================
-        -- JUMP
-        --==================================================
-
-        if Waypoint.Action
-            == Enum.PathWaypointAction.Jump then
-
-            Humanoid.Jump = true
-        end
-
-        Humanoid:MoveTo(
-            Waypoint.Position
+        MoveToPosition(
+            limePart.Position
         )
 
-        --==================================================
-        -- WAIT
-        --==================================================
+        return false
+    end
 
-        local LastPosition =
-            Root.Position
+    for _, obj in ipairs(
+        lime:GetDescendants()
+    ) do
 
-        local LastCheck =
-            tick()
+        if obj:IsA("ProximityPrompt") then
 
-        local Reached = false
+            if typeof(
+                fireproximityprompt
+            ) == "function" then
 
-        local StartTime =
-            tick()
+                local success =
+                    pcall(function()
 
-        while AUTO_WALK
-            and not PathBlocked
-            and TargetPart.Parent do
+                        fireproximityprompt(obj)
+                    end)
 
-            task.wait(0.08)
-
-            local _, CurrentHumanoid, CurrentRoot =
-                GetCharacter()
-
-            if not CurrentHumanoid
-                or not CurrentRoot then
-
-                break
-            end
-
-            --==================================================
-            -- TARGET DISAPPEARED
-            --==================================================
-
-            if not TargetPart.Parent then
-                break
-            end
-
-            --==================================================
-            -- CLOSE TO TARGET
-            --==================================================
-
-            local CurrentTargetDistance =
-                (
-                    CurrentRoot.Position -
-                    TargetPart.Position
-                ).Magnitude
-
-            if CurrentTargetDistance
-                <= TARGET_REACHED_DISTANCE then
-
-                Reached = true
-                break
-            end
-
-            --==================================================
-            -- WAYPOINT REACHED
-            --==================================================
-
-            local WaypointDistance =
-                (
-                    CurrentRoot.Position -
-                    Waypoint.Position
-                ).Magnitude
-
-            if WaypointDistance <= 4 then
-
-                Reached = true
-                break
-            end
-
-            --==================================================
-            -- ANTI-STUCK
-            --==================================================
-
-            if tick() - LastCheck
-                >= STUCK_CHECK_TIME then
-
-                local Moved =
-                    (
-                        CurrentRoot.Position -
-                        LastPosition
-                    ).Magnitude
-
-                if Moved < STUCK_DISTANCE then
-
-                    -- Bị kẹt
-                    Reached = false
-                    PathBlocked = true
-                    break
+                if success then
+                    return true
                 end
-
-                LastPosition =
-                    CurrentRoot.Position
-
-                LastCheck =
-                    tick()
-            end
-
-            --==================================================
-            -- WAYPOINT TIMEOUT
-            --==================================================
-
-            if tick() - StartTime > 4 then
-
-                Reached = false
-                PathBlocked = true
-                break
             end
         end
 
-        if not Reached then
-            break
+        if obj:IsA("ClickDetector") then
+
+            if typeof(
+                fireclickdetector
+            ) == "function" then
+
+                local success =
+                    pcall(function()
+
+                        fireclickdetector(obj)
+                    end)
+
+                if success then
+                    return true
+                end
+            end
         end
     end
 
-    if BlockConnection then
-        BlockConnection:Disconnect()
-    end
-
-    return not PathBlocked
+    return false
 end
 
 --==================================================
--- AUTO WALK ENGINE
+-- 🎯 TARGET
+--==================================================
+
+local function ClearTarget()
+
+    CurrentTarget = nil
+    CurrentTargetPart = nil
+
+    ClearPath()
+end
+
+local function TargetValid()
+
+    if not CurrentTarget then
+        return false
+    end
+
+    if not CurrentTarget.Parent then
+        return false
+    end
+
+    if not IsWatermelon(CurrentTarget) then
+        return false
+    end
+
+    if not CurrentTargetPart then
+
+        CurrentTargetPart =
+            GetObjectPart(CurrentTarget)
+    end
+
+    return CurrentTargetPart ~= nil
+end
+
+--==================================================
+-- 🍉 AUTO TOUCH / BREAK
+--==================================================
+
+local function TouchWatermelon()
+
+    if not IsAlive() then
+        return
+    end
+
+    if not TargetValid() then
+
+        ClearTarget()
+
+        ControllerState =
+            STATE_FIND_WATERMELON
+
+        return
+    end
+
+    local distance =
+        (RootPart.Position -
+            CurrentTargetPart.Position).Magnitude
+
+    -- Đã chạm / đủ gần quả
+    if distance <= WATERMELON_TOUCH_DISTANCE then
+
+        -- Dừng tại quả
+        Humanoid:MoveTo(
+            RootPart.Position
+        )
+
+        -- Chờ game xử lý việc chạm/đập
+        task.wait(0.25)
+
+        -- Nếu quả biến mất -> quả đã được xử lý
+        if not TargetValid() then
+
+            ClearTarget()
+
+            ControllerState =
+                STATE_FIND_WATERMELON
+
+            return
+        end
+
+        -- Nếu quả vẫn còn, tiến sát thêm
+        if distance > 2 then
+
+            MoveToPosition(
+                CurrentTargetPart.Position
+            )
+        end
+
+        return
+    end
+
+    -- Chưa tới quả
+    MoveToPosition(
+        CurrentTargetPart.Position
+    )
+end
+
+--==================================================
+-- 🍉 FIND TARGET
+--==================================================
+
+local function FindWatermelon()
+
+    if not IsAlive() then
+        return
+    end
+
+    if TargetValid() then
+
+        ControllerState =
+            STATE_TOUCH_WATERMELON
+
+        return
+    end
+
+    ClearTarget()
+
+    if tick() - LastScanTime >= SCAN_INTERVAL then
+
+        ScanWatermelons()
+
+        LastScanTime = tick()
+    end
+
+    local target, part =
+        GetNearestWatermelon()
+
+    if target and part then
+
+        CurrentTarget = target
+        CurrentTargetPart = part
+
+        ClearPath()
+
+        ControllerState =
+            STATE_TOUCH_WATERMELON
+
+        return
+    end
+
+    -- Không còn dưa
+    if AUTO_QUEST then
+
+        QuestReceived = false
+
+        ControllerState =
+            STATE_GET_QUEST
+    end
+end
+
+--==================================================
+-- 🍋 QUEST
+--==================================================
+
+local function RunQuest()
+
+    if not AUTO_QUEST then
+        return
+    end
+
+    if not IsAlive() then
+        return
+    end
+
+    if QuestReceived then
+
+        AUTO_QUEST = false
+        AUTO_WALK = true
+
+        QuestReceived = true
+
+        ClearTarget()
+        ClearPath()
+
+        ControllerState =
+            STATE_FIND_WATERMELON
+
+        return
+    end
+
+    if tick() - LastQuestTime
+        < QUEST_COOLDOWN then
+
+        return
+    end
+
+    local lime, limePart =
+        GetLimePart()
+
+    if not limePart then
+        return
+    end
+
+    local distance =
+        (RootPart.Position -
+            limePart.Position).Magnitude
+
+    if distance > QUEST_DISTANCE then
+
+        MoveToPosition(
+            limePart.Position
+        )
+
+        return
+    end
+
+    local success =
+        TalkToLime()
+
+    if success then
+
+        QuestReceived = true
+        LastQuestTime = tick()
+
+        --==========================================
+        -- ⭐ NHẬN QUEST XONG
+        --==========================================
+
+        AUTO_QUEST = false
+        AUTO_WALK = true
+
+        ClearTarget()
+        ClearPath()
+
+        ControllerState =
+            STATE_FIND_WATERMELON
+    end
+end
+
+--==================================================
+-- 🧠 SINGLE CONTROLLER
 --==================================================
 
 task.spawn(function()
 
-    while true do
+    while task.wait(0.12) do
 
-        task.wait(REPATH_TIME)
-
-        if not AUTO_WALK then
+        if not IsAlive() then
             continue
         end
 
-        CleanMarked()
-        ScanWatermelons()
+        -- Không có chức năng nào
+        if not AUTO_QUEST
+            and not AUTO_WALK then
 
-        local Character,
-            Humanoid,
-            Root =
-            GetCharacter()
+            ControllerState =
+                STATE_IDLE
 
-        if not Character
-            or not Humanoid
-            or not Root then
+            ClearPath()
 
             continue
         end
 
-        if Humanoid.Health <= 0 then
-            continue
-        end
+        --==========================================
+        -- QUEST
+        --==========================================
 
-        --==================================================
-        -- FIND TARGET
-        --==================================================
+        if AUTO_QUEST then
 
-        local Target,
-            Distance =
-            GetNearestWatermelon()
+            ControllerState =
+                STATE_GET_QUEST
 
-        if not Target then
+            RunQuest()
 
-            Status.Text =
-                "❌ Không tìm thấy dưa"
+        --==========================================
+        -- WATERMELON
+        --==========================================
 
-            StopMovement()
+        elseif AUTO_WALK then
 
-            task.wait(0.5)
+            if ControllerState
+                == STATE_IDLE then
 
-            continue
-        end
+                ControllerState =
+                    STATE_FIND_WATERMELON
+            end
 
-        local Data =
-            Marked[Target]
+            if ControllerState
+                == STATE_FIND_WATERMELON then
 
-        if not Data
-            or not Data.Part
-            or not Data.Part.Parent then
+                FindWatermelon()
 
-            continue
-        end
+            elseif ControllerState
+                == STATE_TOUCH_WATERMELON then
 
-        --==================================================
-        -- STATUS
-        --==================================================
-
-        Status.Text =
-            string.format(
-                "🍉 %s | %.0f studs",
-                Target.Name,
-                Distance
-            )
-
-        --==================================================
-        -- ALREADY NEAR
-        --==================================================
-
-        if Distance
-            <= TARGET_REACHED_DISTANCE then
-
-            StopMovement()
-
-            task.wait(0.25)
-
-            continue
-        end
-
-        --==================================================
-        -- FOLLOW
-        --==================================================
-
-        local Success =
-            FollowPath(Data.Part)
-
-        --==================================================
-        -- PATH FAILED / STUCK
-        --==================================================
-
-        if not Success
-            and AUTO_WALK then
-
-            Status.Text =
-                "🔄 Bị kẹt — đổi đường..."
-
-            StopMovement()
-
-            task.wait(0.15)
+                TouchWatermelon()
+            end
         end
     end
 end)
 
 --==================================================
--- FPS BOOST
+-- 🎨 ESP
 --==================================================
 
-local function EnableFPSBoost()
+local function RemoveESP(obj)
 
-    -- Backup Lighting
-    FPSBackup.GlobalShadows =
-        Lighting.GlobalShadows
-
-    FPSBackup.FogEnd =
-        Lighting.FogEnd
-
-    Lighting.GlobalShadows = false
-    Lighting.FogEnd = 100000
-
-    -- Backup & disable PostEffects
-    for _, Object in ipairs(
-        Lighting:GetChildren()
-    ) do
-
-        if Object:IsA("PostEffect") then
-
-            if FPSBackup.Effects[Object] == nil then
-
-                FPSBackup.Effects[Object] =
-                    Object.Enabled
-            end
-
-            Object.Enabled = false
-        end
+    if not obj then
+        return
     end
 
-    -- Terrain
-    local Terrain =
-        Workspace:FindFirstChildOfClass(
-            "Terrain"
+    local highlight =
+        obj:FindFirstChild(
+            "WatermelonHighlight"
         )
 
-    if Terrain then
-
-        FPSBackup.TerrainDecoration =
-            Terrain.Decoration
-
-        Terrain.Decoration = false
+    if highlight then
+        highlight:Destroy()
     end
 
-    -- Particles / Trails / Beams
-    for _, Object in ipairs(
+    local dot =
+        obj:FindFirstChild(
+            "WatermelonDot"
+        )
+
+    if dot then
+        dot:Destroy()
+    end
+end
+
+local function AddESP(obj)
+
+    if not obj
+        or not obj.Parent then
+
+        return
+    end
+
+    local part =
+        GetObjectPart(obj)
+
+    if not part then
+        return
+    end
+
+    if ESP_ENABLED then
+
+        local highlight =
+            obj:FindFirstChild(
+                "WatermelonHighlight"
+            )
+
+        if not highlight then
+
+            highlight =
+                Instance.new("Highlight")
+
+            highlight.Name =
+                "WatermelonHighlight"
+
+            highlight.Adornee = obj
+
+            highlight.FillColor =
+                Color3.fromRGB(
+                    255, 0, 0
+                )
+
+            highlight.OutlineColor =
+                Color3.fromRGB(
+                    255, 255, 255
+                )
+
+            highlight.FillTransparency =
+                0.45
+
+            highlight.Parent = obj
+        end
+
+    else
+
+        RemoveESP(obj)
+    end
+
+    if DOT_ENABLED then
+
+        local dot =
+            obj:FindFirstChild(
+                "WatermelonDot"
+            )
+
+        if not dot then
+
+            local billboard =
+                Instance.new("BillboardGui")
+
+            billboard.Name =
+                "WatermelonDot"
+
+            billboard.Adornee = part
+            billboard.Size =
+                UDim2.fromOffset(18, 18)
+
+            billboard.StudsOffset =
+                Vector3.new(0, 3, 0)
+
+            billboard.AlwaysOnTop = true
+            billboard.Parent = obj
+
+            local frame =
+                Instance.new("Frame")
+
+            frame.Size =
+                UDim2.fromScale(1, 1)
+
+            frame.BackgroundColor3 =
+                Color3.fromRGB(
+                    255, 0, 0
+                )
+
+            frame.BorderSizePixel = 0
+            frame.Parent = billboard
+
+            local corner =
+                Instance.new("UICorner")
+
+            corner.CornerRadius =
+                UDim.new(1, 0)
+
+            corner.Parent = frame
+        end
+
+    else
+
+        local dot =
+            obj:FindFirstChild(
+                "WatermelonDot"
+            )
+
+        if dot then
+            dot:Destroy()
+        end
+    end
+end
+
+local function UpdateESP()
+
+    for _, obj in ipairs(
         Workspace:GetDescendants()
     ) do
 
-        if Object:IsA("ParticleEmitter") then
+        if IsWatermelon(obj) then
+            AddESP(obj)
+        end
+    end
+end
 
-            if FPSBackup.Particles[Object] == nil then
+Workspace.DescendantAdded:Connect(function(obj)
 
-                FPSBackup.Particles[Object] =
-                    Object.Enabled
+    if IsWatermelon(obj) then
+
+        task.wait(0.1)
+
+        AddESP(obj)
+    end
+end)
+
+--==================================================
+-- 🚀 FPS BOOST
+--==================================================
+
+local SavedLighting = {}
+
+local function FPSBoost(enable)
+
+    if enable then
+
+        SavedLighting.GlobalShadows =
+            Lighting.GlobalShadows
+
+        SavedLighting.FogEnd =
+            Lighting.FogEnd
+
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 100000
+
+        for _, obj in ipairs(
+            Workspace:GetDescendants()
+        ) do
+
+            if obj:IsA("ParticleEmitter")
+                or obj:IsA("Trail")
+                or obj:IsA("Beam") then
+
+                obj.Enabled = false
+
+            elseif obj:IsA("BasePart") then
+
+                obj.CastShadow = false
             end
+        end
 
-            Object.Enabled = false
+    else
 
-        elseif Object:IsA("Trail") then
+        if SavedLighting.GlobalShadows ~= nil then
 
-            if FPSBackup.Trails[Object] == nil then
+            Lighting.GlobalShadows =
+                SavedLighting.GlobalShadows
+        end
 
-                FPSBackup.Trails[Object] =
-                    Object.Enabled
-            end
+        if SavedLighting.FogEnd ~= nil then
 
-            Object.Enabled = false
-
-        elseif Object:IsA("Beam") then
-
-            if FPSBackup.Beams[Object] == nil then
-
-                FPSBackup.Beams[Object] =
-                    Object.Enabled
-            end
-
-            Object.Enabled = false
+            Lighting.FogEnd =
+                SavedLighting.FogEnd
         end
     end
 end
 
 --==================================================
--- FPS RESTORE
---==================================================
-
-local function DisableFPSBoost()
-
-    if FPSBackup.GlobalShadows ~= nil then
-
-        Lighting.GlobalShadows =
-            FPSBackup.GlobalShadows
-    end
-
-    if FPSBackup.FogEnd ~= nil then
-
-        Lighting.FogEnd =
-            FPSBackup.FogEnd
-    end
-
-    -- Restore Effects
-    for Object, Enabled in pairs(
-        FPSBackup.Effects
-    ) do
-
-        if Object and Object.Parent then
-            Object.Enabled = Enabled
-        end
-    end
-
-    -- Restore Particles
-    for Object, Enabled in pairs(
-        FPSBackup.Particles
-    ) do
-
-        if Object and Object.Parent then
-            Object.Enabled = Enabled
-        end
-    end
-
-    -- Restore Trails
-    for Object, Enabled in pairs(
-        FPSBackup.Trails
-    ) do
-
-        if Object and Object.Parent then
-            Object.Enabled = Enabled
-        end
-    end
-
-    -- Restore Beams
-    for Object, Enabled in pairs(
-        FPSBackup.Beams
-    ) do
-
-        if Object and Object.Parent then
-            Object.Enabled = Enabled
-        end
-    end
-
-    -- Restore Terrain
-    local Terrain =
-        Workspace:FindFirstChildOfClass(
-            "Terrain"
-        )
-
-    if Terrain
-        and FPSBackup.TerrainDecoration ~= nil then
-
-        Terrain.Decoration =
-            FPSBackup.TerrainDecoration
-    end
-end
-
---==================================================
--- GUI
+-- 🖥️ GUI
 --==================================================
 
 local ScreenGui =
     Instance.new("ScreenGui")
 
 ScreenGui.Name =
-    "SolRNG_Watermelon_V6"
+    "SolRNG_V8"
 
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = PlayerGui
-
---==================================================
--- MAIN
---==================================================
 
 local Main =
     Instance.new("Frame")
 
 Main.Size =
-    UDim2.fromOffset(280, 285)
+    UDim2.fromOffset(280, 355)
 
 Main.Position =
     UDim2.new(
         0.5,
         -140,
         0.5,
-        -142
+        -177
     )
 
 Main.BackgroundColor3 =
-    Color3.fromRGB(20, 20, 25)
+    Color3.fromRGB(
+        25, 25, 30
+    )
 
 Main.BorderSizePixel = 0
 Main.Parent = ScreenGui
@@ -953,112 +989,75 @@ local Title =
     Instance.new("TextLabel")
 
 Title.Size =
-    UDim2.new(1, 0, 0, 32)
-
-Title.Position =
-    UDim2.fromOffset(0, 5)
+    UDim2.new(1, 0, 0, 45)
 
 Title.BackgroundTransparency = 1
 
 Title.Text =
-    "🍉 SolRNG ESP Watermelon V6"
+    "🍉 SolRNG Watermelon V8"
 
 Title.TextColor3 =
- Color3.new(1, 1, 1)
+    Color3.fromRGB(
+        255, 255, 255
+    )
 
-Title.TextSize = 16
-
-Title.Font =
-    Enum.Font.GothamBold
-
+Title.TextSize = 18
+Title.Font = Enum.Font.GothamBold
 Title.Parent = Main
-
-local Credit =
-    Instance.new("TextLabel")
-
-Credit.Size =
-    UDim2.new(1, 0, 0, 18)
-
-Credit.Position =
-    UDim2.fromOffset(0, 34)
-
-Credit.BackgroundTransparency = 1
-
-Credit.Text =
-    "by sarry_fixe"
-
-Credit.TextColor3 =
-    Color3.fromRGB(170, 170, 170)
-
-Credit.TextSize = 11
-
-Credit.Font =
-    Enum.Font.Gotham
-
-Credit.Parent = Main
 
 --==================================================
 -- DRAG
 --==================================================
 
-local Dragging = false
-local DragStart
-local StartPosition
+local dragging = false
+local dragStart
+local startPos
 
-Title.InputBegan:Connect(function(Input)
+Title.InputBegan:Connect(function(input)
 
-    if Input.UserInputType
+    if input.UserInputType
         == Enum.UserInputType.MouseButton1
 
-        or Input.UserInputType
+        or input.UserInputType
         == Enum.UserInputType.Touch then
 
-        Dragging = true
+        dragging = true
+        dragStart = input.Position
+        startPos = Main.Position
 
-        DragStart =
-            Input.Position
+        input.Changed:Connect(function()
 
-        StartPosition =
-            Main.Position
+            if input.UserInputState
+                == Enum.UserInputState.End then
+
+                dragging = false
+            end
+        end)
     end
 end)
 
-UIS.InputChanged:Connect(function(Input)
+UIS.InputChanged:Connect(function(input)
 
-    if not Dragging then
+    if not dragging then
         return
     end
 
-    if Input.UserInputType
+    if input.UserInputType
         == Enum.UserInputType.MouseMovement
 
-        or Input.UserInputType
+        or input.UserInputType
         == Enum.UserInputType.Touch then
 
-        local Delta =
-            Input.Position -
-            DragStart
+        local delta =
+            input.Position - dragStart
 
         Main.Position =
             UDim2.new(
-                StartPosition.X.Scale,
-                StartPosition.X.Offset + Delta.X,
-
-                StartPosition.Y.Scale,
-                StartPosition.Y.Offset + Delta.Y
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
             )
-    end
-end)
-
-UIS.InputEnded:Connect(function(Input)
-
-    if Input.UserInputType
-        == Enum.UserInputType.MouseButton1
-
-        or Input.UserInputType
-        == Enum.UserInputType.Touch then
-
-        Dragging = false
     end
 end)
 
@@ -1066,43 +1065,56 @@ end)
 -- BUTTON
 --==================================================
 
-local function CreateButton(Text, Y)
+local function CreateButton(
+    text,
+    y
+)
 
-    local Button =
+    local button =
         Instance.new("TextButton")
 
-    Button.Size =
-        UDim2.new(1, -30, 0, 38)
+    button.Size =
+        UDim2.new(
+            1,
+            -20,
+            0,
+            40
+        )
 
-    Button.Position =
-        UDim2.fromOffset(15, Y)
+    button.Position =
+        UDim2.new(
+            0,
+            10,
+            0,
+            y
+        )
 
-    Button.BackgroundColor3 =
-        Color3.fromRGB(35, 35, 45)
+    button.BackgroundColor3 =
+        Color3.fromRGB(
+            40, 40, 48
+        )
 
-    Button.BorderSizePixel = 0
+    button.TextColor3 =
+        Color3.fromRGB(
+            255, 255, 255
+        )
 
-    Button.Text = Text
+    button.TextSize = 14
+    button.Font =
+        Enum.Font.GothamBold
 
-    Button.TextColor3 =
-        Color3.new(1, 1, 1)
+    button.Text = text
+    button.Parent = Main
 
-    Button.TextSize = 14
-
-    Button.Font =
-        Enum.Font.GothamMedium
-
-    Button.Parent = Main
-
-    local Corner =
+    local corner =
         Instance.new("UICorner")
 
-    Corner.CornerRadius =
+    corner.CornerRadius =
         UDim.new(0, 8)
 
-    Corner.Parent = Button
+    corner.Parent = button
 
-    return Button
+    return button
 end
 
 --==================================================
@@ -1111,188 +1123,253 @@ end
 
 local ESPButton =
     CreateButton(
-        "👁️ ESP Dưa hấu : OFF",
-        58
+        "ESP: ON",
+        50
     )
 
 local DotButton =
     CreateButton(
-        "🎯 Dấu chấm giữa : ON",
-        103
+        "Dot: ON",
+        95
     )
 
 local FPSButton =
     CreateButton(
-        "🚀 FPS Boost : OFF",
-        148
+        "FPS Boost: OFF",
+        140
     )
 
-local AutoButton =
+local QuestButton =
     CreateButton(
-        "🍉 Auto đi tới dưa : OFF",
-        193
+        "🍋 Auto Quest Limee: OFF",
+        185
     )
+
+local WalkButton =
+    CreateButton(
+        "🍉 Auto Dưa Hấu: OFF",
+        230
+    )
+
+--==================================================
+-- STATUS
+--==================================================
 
 local Status =
     Instance.new("TextLabel")
 
 Status.Size =
-    UDim2.new(1, -30, 0, 35)
+    UDim2.new(
+        1,
+        -20,
+        0,
+        65
+    )
 
 Status.Position =
-    UDim2.fromOffset(15, 238)
+    UDim2.new(
+        0,
+        10,
+        0,
+        280
+    )
 
 Status.BackgroundTransparency = 1
 
-Status.Text =
-    "Chưa quét"
-
 Status.TextColor3 =
-    Color3.fromRGB(200, 200, 200)
+    Color3.fromRGB(
+        190, 190, 190
+    )
 
 Status.TextSize = 12
-
-Status.Font =
-    Enum.Font.Gotham
-
+Status.Font = Enum.Font.Gotham
+Status.TextWrapped = true
 Status.Parent = Main
 
 --==================================================
--- ESP ON/OFF - FIXED
+-- STATUS UPDATE
 --==================================================
 
-local function UpdateAllESP()
+task.spawn(function()
 
-    for Object, Data in pairs(Marked) do
+    while task.wait(0.2) do
 
-        if Data
-            and Data.Highlight
-            and Data.Highlight.Parent then
+        local targetText = "None"
 
-            Data.Highlight.Enabled =
-                ESP_ENABLED
+        if CurrentTarget then
+            targetText =
+                CurrentTarget.Name
         end
-    end
-end
 
-ESPButton.Activated:Connect(function()
+        Status.Text =
+            "State: "
+            .. ControllerState
+            .. "\nTarget: "
+            .. targetText
+            .. "\nQuest: "
+            .. (
+                QuestReceived
+                and "ACTIVE"
+                or "NONE"
+            )
+    end
+end)
+
+--==================================================
+-- ESP BUTTON
+--==================================================
+
+ESPButton.MouseButton1Click:Connect(function()
 
     ESP_ENABLED =
         not ESP_ENABLED
 
-    if ESP_ENABLED then
+    ESPButton.Text =
+        "ESP: "
+        .. (
+            ESP_ENABLED
+            and "ON"
+            or "OFF"
+        )
 
-        ESPButton.Text =
-            "👁️ ESP Dưa hấu : ON"
-
-    else
-
-        ESPButton.Text =
-            "👁️ ESP Dưa hấu : OFF"
-    end
-
-    UpdateAllESP()
+    UpdateESP()
 end)
 
 --==================================================
--- DOT ON/OFF
+-- DOT BUTTON
 --==================================================
 
-DotButton.Activated:Connect(function()
+DotButton.MouseButton1Click:Connect(function()
 
     DOT_ENABLED =
         not DOT_ENABLED
 
-    if DOT_ENABLED then
+    DotButton.Text =
+        "Dot: "
+        .. (
+            DOT_ENABLED
+            and "ON"
+            or "OFF"
+        )
 
-        DotButton.Text =
-            "🎯 Dấu chấm giữa : ON"
-
-    else
-
-        DotButton.Text =
-            "🎯 Dấu chấm giữa : OFF"
-    end
-
-    for _, Data in pairs(Marked) do
-
-        if Data
-            and Data.Dot
-            and Data.Dot.Parent then
-
-            Data.Dot.Enabled =
-                DOT_ENABLED
-        end
-    end
+    UpdateESP()
 end)
 
 --==================================================
 -- FPS BUTTON
 --==================================================
 
-FPSButton.Activated:Connect(function()
+FPSButton.MouseButton1Click:Connect(function()
 
     FPS_ENABLED =
         not FPS_ENABLED
 
-    if FPS_ENABLED then
+    FPSButton.Text =
+        "FPS Boost: "
+        .. (
+            FPS_ENABLED
+            and "ON"
+            or "OFF"
+        )
 
-        FPSButton.Text =
-            "🚀 FPS Boost : ON"
+    FPSBoost(FPS_ENABLED)
+end)
 
-        EnableFPSBoost()
+--==================================================
+-- 🍋 QUEST BUTTON
+--==================================================
+
+QuestButton.MouseButton1Click:Connect(function()
+
+    AUTO_QUEST =
+        not AUTO_QUEST
+
+    if AUTO_QUEST then
+
+        -- Không chạy 2 controller cùng lúc
+        AUTO_WALK = false
+
+        QuestReceived = false
+
+        ClearTarget()
+        ClearPath()
+
+        ControllerState =
+            STATE_GET_QUEST
+
+        QuestButton.Text =
+            "🍋 Auto Quest Limee: ON"
+
+        WalkButton.Text =
+            "🍉 Auto Dưa Hấu: OFF"
 
     else
 
-        FPSButton.Text =
-            "🚀 FPS Boost : OFF"
+        QuestButton.Text =
+            "🍋 Auto Quest Limee: OFF"
 
-        DisableFPSBoost()
+        if not AUTO_WALK then
+
+            ControllerState =
+                STATE_IDLE
+
+            ClearPath()
+        end
     end
 end)
 
 --==================================================
--- AUTO WALK BUTTON
+-- 🍉 WATERMELON BUTTON
 --==================================================
 
-AutoButton.Activated:Connect(function()
+WalkButton.MouseButton1Click:Connect(function()
 
     AUTO_WALK =
         not AUTO_WALK
 
     if AUTO_WALK then
 
-        AutoButton.Text =
-            "🍉 Auto đi tới dưa : ON"
+        AUTO_QUEST = false
 
-        ScanWatermelons()
+        ClearTarget()
+        ClearPath()
 
-        Status.Text =
-            "🧭 Đang tìm đường..."
+        ControllerState =
+            STATE_FIND_WATERMELON
+
+        QuestButton.Text =
+            "🍋 Auto Quest Limee: OFF"
+
+        WalkButton.Text =
+            "🍉 Auto Dưa Hấu: ON"
 
     else
 
-        AutoButton.Text =
-            "🍉 Auto đi tới dưa : OFF"
+        WalkButton.Text =
+            "🍉 Auto Dưa Hấu: OFF"
 
-        StopMovement()
+        ControllerState =
+            STATE_IDLE
 
-        Status.Text =
-            "⏹️ Đã dừng Auto"
+        ClearTarget()
+        ClearPath()
     end
 end)
 
 --==================================================
--- HIDE / SHOW
+-- 👻 MINIMIZE
 --==================================================
 
-local ToggleButton =
+local Mini =
     Instance.new("TextButton")
 
-ToggleButton.Size =
-    UDim2.fromOffset(52, 52)
+Mini.Size =
+    UDim2.fromOffset(
+        50,
+        50
+    )
 
-ToggleButton.Position =
+Mini.Position =
     UDim2.new(
         0,
         15,
@@ -1300,45 +1377,94 @@ ToggleButton.Position =
         -25
     )
 
-ToggleButton.BackgroundColor3 =
-    Color3.fromRGB(25, 25, 30)
+Mini.BackgroundColor3 =
+    Color3.fromRGB(
+        25, 25, 30
+    )
 
-ToggleButton.BackgroundTransparency =
-    0.15
+Mini.Text = "🍉"
+Mini.TextSize = 25
+Mini.Visible = false
+Mini.Parent = ScreenGui
 
-ToggleButton.Text =
-    "🍉"
-
-ToggleButton.TextSize = 24
-
-ToggleButton.TextColor3 =
-    Color3.new(1, 1, 1)
-
-ToggleButton.BorderSizePixel = 0
-ToggleButton.Parent = ScreenGui
-
-local ToggleCorner =
+local MiniCorner =
     Instance.new("UICorner")
 
-ToggleCorner.CornerRadius =
+MiniCorner.CornerRadius =
     UDim.new(1, 0)
 
-ToggleCorner.Parent =
-    ToggleButton
+MiniCorner.Parent = Mini
 
-ToggleButton.Activated:Connect(function()
+local HideButton =
+    Instance.new("TextButton")
 
-    Main.Visible =
-        not Main.Visible
+HideButton.Size =
+    UDim2.fromOffset(
+        25,
+        25
+    )
 
-    ToggleButton.Text =
-        Main.Visible
-        and "✕"
-        or "🍉"
+HideButton.Position =
+    UDim2.new(
+        1,
+        -32,
+        0,
+        10
+    )
+
+HideButton.BackgroundTransparency = 1
+HideButton.Text = "×"
+HideButton.TextColor3 =
+    Color3.fromRGB(
+        255, 255, 255
+    )
+
+HideButton.TextSize = 20
+HideButton.Parent = Main
+
+HideButton.MouseButton1Click:Connect(function()
+
+    Main.Visible = false
+    Mini.Visible = true
+end)
+
+Mini.MouseButton1Click:Connect(function()
+
+    Main.Visible = true
+    Mini.Visible = false
 end)
 
 --==================================================
--- START
+-- 🔄 RESCAN
 --==================================================
 
-ScanWatermelons()
+task.spawn(function()
+
+    task.wait(1)
+
+    ScanWatermelons()
+    UpdateESP()
+
+    while task.wait(2) do
+
+        ScanWatermelons()
+
+        if ESP_ENABLED
+            or DOT_ENABLED then
+
+            UpdateESP()
+        end
+    end
+end)
+
+--==================================================
+-- ✅ LOADED
+--==================================================
+
+print(
+    "🍉 SolRNG Watermelon V8 Loaded"
+)
+
+print(
+    "🍋 Limee Quest -> 🍉 Touch Watermelon"
+)
