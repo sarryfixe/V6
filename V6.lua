@@ -2,27 +2,17 @@
 -- 🍉 SolRNG Watermelon V1
 -- by sarry_fixe
 --==================================================
--- Chức năng:
--- 🍉 Định vị dưa + chấm đỏ
--- 🤖 Auto tìm và đi tới dưa
--- 🚀 SubSpeed 1-100
--- 🍋 Tự đi tới Lime
--- 🗣️ Tự Talk với Lime
--- 🎮 Tự chọn Minigame
--- 🎟️ Minigame sẽ do hệ thống game xử lý Ticket
--- 🖱️ Menu kéo được
--- 👁️ Ẩn / hiện menu
---==================================================
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local UserInputService = game:GetService("UserInputService")
+local UIS = game:GetService("UserInputService")
+local PathfindingService = game:GetService("PathfindingService")
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 --==================================================
--- SETTINGS
+-- ⚙️ SETTINGS
 --==================================================
 
 local LIME_NAME = "Lime"
@@ -35,8 +25,22 @@ local SUB_SPEED = 35
 local NORMAL_SPEED = 16
 
 local TOUCH_DISTANCE = 4.5
-local MOVE_INTERVAL = 0.12
-local SCAN_INTERVAL = 0.5
+
+-- Nếu đứng yên quá lâu sẽ respawn
+local STUCK_TIME = 10
+
+-- Khoảng thời gian kiểm tra nhân vật có di chuyển
+local STUCK_CHECK_INTERVAL = 0.5
+
+-- Khoảng cách giữa các waypoint
+local WAYPOINT_REACHED_DISTANCE = 4
+
+-- Thời gian chờ sau respawn
+local RESPAWN_WAIT = 2
+
+--==================================================
+-- 🍉 WATERMELON KEYWORDS
+--==================================================
 
 local WATERMELON_KEYWORDS = {
 	"watermelon",
@@ -49,33 +53,62 @@ local WATERMELON_KEYWORDS = {
 }
 
 --==================================================
--- CHARACTER
+-- 👤 CHARACTER
 --==================================================
 
-local Character
-local Humanoid
-local Root
+local Character = nil
+local Humanoid = nil
+local Root = nil
+
+local CharacterReady = false
 
 local function SetupCharacter(character)
+
 	Character = character
-	Humanoid = character:WaitForChild("Humanoid")
-	Root = character:WaitForChild("HumanoidRootPart")
+	CharacterReady = false
+
+	Humanoid = character:WaitForChild(
+		"Humanoid",
+		10
+	)
+
+	Root = character:WaitForChild(
+		"HumanoidRootPart",
+		10
+	)
+
+	if Humanoid and Root then
+		CharacterReady = true
+	end
 end
 
 if Player.Character then
-	task.spawn(SetupCharacter, Player.Character)
+	task.spawn(function()
+		SetupCharacter(Player.Character)
+	end)
 end
 
 Player.CharacterAdded:Connect(function(character)
-	task.wait(0.5)
+
 	SetupCharacter(character)
+
+	task.wait(0.5)
+
+	-- Nếu Auto dưa đang bật,
+	-- bắt đầu lại từ nhân vật mới.
+	if AUTO_WATERMELON then
+		CurrentWatermelon = nil
+		PathWaypoints = nil
+		PathIndex = 1
+	end
 end)
 
 --==================================================
--- OBJECT PART
+-- 📦 GET PART
 --==================================================
 
-local function GetPart(object)
+function GetPart(object)
+
 	if not object then
 		return nil
 	end
@@ -85,6 +118,7 @@ local function GetPart(object)
 	end
 
 	if object:IsA("Model") then
+
 		if object.PrimaryPart then
 			return object.PrimaryPart
 		end
@@ -102,18 +136,30 @@ local function GetPart(object)
 end
 
 --==================================================
--- WATERMELON DETECTION
+-- 🍉 CHECK WATERMELON
 --==================================================
 
 local function IsWatermelon(object)
+
 	if not object then
 		return false
 	end
 
-	local name = string.lower(object.Name)
+	local name = string.lower(
+		object.Name
+	)
 
-	for _, keyword in ipairs(WATERMELON_KEYWORDS) do
-		if string.find(name, keyword, 1, true) then
+	for _, keyword in ipairs(
+		WATERMELON_KEYWORDS
+	) do
+
+		if string.find(
+			name,
+			keyword,
+			1,
+			true
+		) then
+
 			return true
 		end
 	end
@@ -122,25 +168,28 @@ local function IsWatermelon(object)
 end
 
 --==================================================
--- ESP
+-- 🍉 ESP
 --==================================================
 
 local function RemoveESP(object)
+
 	if not object then
 		return
 	end
 
-	local highlight = object:FindFirstChild(
-		"WatermelonESP"
-	)
+	local highlight =
+		object:FindFirstChild(
+			"WatermelonESP"
+		)
 
 	if highlight then
 		highlight:Destroy()
 	end
 
-	local dot = object:FindFirstChild(
-		"WatermelonDot"
-	)
+	local dot =
+		object:FindFirstChild(
+			"WatermelonDot"
+		)
 
 	if dot then
 		dot:Destroy()
@@ -148,86 +197,143 @@ local function RemoveESP(object)
 end
 
 local function AddESP(object)
+
 	if not ESP_ENABLED then
 		return
 	end
 
-	if not object:IsDescendantOf(Workspace) then
+	if not object:IsDescendantOf(
+		Workspace
+	) then
 		return
 	end
 
-	local part = GetPart(object)
+	local part =
+		GetPart(object)
 
 	if not part then
 		return
 	end
 
 	-- Highlight
-	if not object:FindFirstChild("WatermelonESP") then
+	if not object:FindFirstChild(
+		"WatermelonESP"
+	) then
 
-		local highlight = Instance.new("Highlight")
+		local highlight =
+			Instance.new("Highlight")
 
-		highlight.Name = "WatermelonESP"
-		highlight.Adornee = object
+		highlight.Name =
+			"WatermelonESP"
 
-		highlight.FillTransparency = 0.65
-		highlight.OutlineTransparency = 0
+		highlight.Adornee =
+			object
+
+		highlight.FillTransparency =
+			0.65
+
+		highlight.OutlineTransparency =
+			0
 
 		highlight.FillColor =
-			Color3.fromRGB(255, 0, 0)
+			Color3.fromRGB(
+				255,
+				0,
+				0
+			)
 
 		highlight.OutlineColor =
-			Color3.fromRGB(255, 255, 255)
+			Color3.fromRGB(
+				255,
+				255,
+				255
+			)
 
 		highlight.DepthMode =
 			Enum.HighlightDepthMode.AlwaysOnTop
 
-		highlight.Parent = object
+		highlight.Parent =
+			object
 	end
 
-	-- Red dot
-	if not object:FindFirstChild("WatermelonDot") then
+	-- 🔴 Red dot
+	if not object:FindFirstChild(
+		"WatermelonDot"
+	) then
 
-		local billboard = Instance.new(
-			"BillboardGui"
-		)
+		local billboard =
+			Instance.new(
+				"BillboardGui"
+			)
 
-		billboard.Name = "WatermelonDot"
-		billboard.Adornee = part
+		billboard.Name =
+			"WatermelonDot"
+
+		billboard.Adornee =
+			part
 
 		billboard.Size =
-			UDim2.fromOffset(16, 16)
+			UDim2.fromOffset(
+				16,
+				16
+			)
 
 		billboard.StudsOffset =
-			Vector3.new(0, 3, 0)
+			Vector3.new(
+				0,
+				3,
+				0
+			)
 
-		billboard.AlwaysOnTop = true
-		billboard.Parent = object
+		billboard.AlwaysOnTop =
+			true
 
-		local dot = Instance.new("Frame")
+		billboard.Parent =
+			object
 
-		dot.Size = UDim2.fromScale(1, 1)
+		local dot =
+			Instance.new("Frame")
+
+		dot.Size =
+			UDim2.fromScale(
+				1,
+				1
+			)
 
 		dot.BackgroundColor3 =
-			Color3.fromRGB(255, 0, 0)
+			Color3.fromRGB(
+				255,
+				0,
+				0
+			)
 
 		dot.BorderSizePixel = 0
-		dot.Parent = billboard
 
-		local corner = Instance.new("UICorner")
+		dot.Parent =
+			billboard
+
+		local corner =
+			Instance.new(
+				"UICorner"
+			)
 
 		corner.CornerRadius =
-			UDim.new(1, 0)
+			UDim.new(
+				1,
+				0
+			)
 
-		corner.Parent = dot
+		corner.Parent =
+			dot
 	end
 end
 
 --==================================================
--- SCAN WATERMELONS
+-- 🔍 SCAN WATERMELONS
 --==================================================
 
 local function GetWatermelons()
+
 	local result = {}
 
 	for _, object in ipairs(
@@ -236,10 +342,15 @@ local function GetWatermelons()
 
 		if IsWatermelon(object) then
 
-			local part = GetPart(object)
+			local part =
+				GetPart(object)
 
 			if part then
-				table.insert(result, object)
+
+				table.insert(
+					result,
+					object
+				)
 
 				if ESP_ENABLED then
 					AddESP(object)
@@ -251,49 +362,62 @@ local function GetWatermelons()
 	return result
 end
 
-Workspace.DescendantAdded:Connect(function(object)
+Workspace.DescendantAdded:Connect(
+	function(object)
 
-	task.wait(0.05)
+		task.wait(0.05)
 
-	if IsWatermelon(object)
-	and ESP_ENABLED then
+		if IsWatermelon(object)
+		and ESP_ENABLED then
 
-		AddESP(object)
+			AddESP(object)
+		end
 	end
-end)
+)
 
 --==================================================
--- NEAREST WATERMELON
+-- 🎯 NEAREST WATERMELON
 --==================================================
 
-local CurrentWatermelon = nil
+CurrentWatermelon = nil
 
 local function GetNearestWatermelon()
+
 	if not Root then
 		return nil
 	end
 
 	local nearest = nil
-	local nearestDistance = math.huge
+	local nearestDistance =
+		math.huge
 
 	for _, object in ipairs(
 		GetWatermelons()
 	) do
 
-		if object:IsDescendantOf(Workspace) then
+		if object:IsDescendantOf(
+			Workspace
+		) then
 
-			local part = GetPart(object)
+			local part =
+				GetPart(object)
 
 			if part then
 
 				local distance =
-					(Root.Position - part.Position).Magnitude
+					(
+						Root.Position -
+						part.Position
+					).Magnitude
 
-				if distance < nearestDistance then
+				if distance <
+					nearestDistance then
 
-					nearestDistance = distance
-					nearest = object
+					nearestDistance =
+						distance
 
+					nearest =
+						object
 				end
 			end
 		end
@@ -303,17 +427,13 @@ local function GetNearestWatermelon()
 end
 
 --==================================================
--- SPEED
+-- 🚀 SPEED
 --==================================================
 
-local function SetNormalSpeed()
-	if Humanoid then
-		Humanoid.WalkSpeed = NORMAL_SPEED
-	end
-end
-
 local function SetSubSpeed()
+
 	if Humanoid then
+
 		Humanoid.WalkSpeed =
 			math.clamp(
 				SUB_SPEED,
@@ -323,130 +443,561 @@ local function SetSubSpeed()
 	end
 end
 
+local function SetNormalSpeed()
+
+	if Humanoid then
+		Humanoid.WalkSpeed =
+			NORMAL_SPEED
+	end
+end
+
 --==================================================
--- MOVE TO
+-- 🧭 PATH VARIABLES
 --==================================================
 
-local function MoveToPosition(
-	position,
-	speed
-)
-	if not Humanoid or not Root then
+local PathWaypoints = nil
+local PathIndex = 1
+
+local LastPathTarget = nil
+
+--==================================================
+-- 🧭 COMPUTE PATH
+--==================================================
+
+local function ComputePath(targetPosition)
+
+	if not Root then
 		return false
 	end
 
-	Humanoid.WalkSpeed = speed
+	local path =
+		PathfindingService:CreatePath({
 
-	Humanoid:MoveTo(position)
+			AgentRadius = 2,
 
-	while Humanoid
-	and Root
-	and Humanoid.Health > 0 do
+			AgentHeight = 5,
 
-		local distance =
-			(Root.Position - position).Magnitude
+			AgentCanJump = true,
 
-		if distance <= TOUCH_DISTANCE then
-			return true
+			AgentCanClimb = true,
+
+			WaypointSpacing = 4
+		})
+
+	local success =
+		pcall(function()
+
+			path:ComputeAsync(
+				Root.Position,
+				targetPosition
+			)
+
+		end)
+
+	if not success then
+		return false
+	end
+
+	if path.Status
+		~= Enum.PathStatus.Success then
+
+		return false
+	end
+
+	local waypoints =
+		path:GetWaypoints()
+
+	if #waypoints == 0 then
+		return false
+	end
+
+	PathWaypoints =
+		waypoints
+
+	PathIndex = 1
+
+	LastPathTarget =
+		targetPosition
+
+	return true
+end
+
+--==================================================
+-- ♻️ RESET PATH
+--==================================================
+
+local function ResetPath()
+
+	PathWaypoints = nil
+	PathIndex = 1
+	LastPathTarget = nil
+
+end
+
+--==================================================
+-- 💀 RESPAWN / UNSTUCK
+--==================================================
+
+local Respawning = false
+
+local function RespawnBecauseStuck()
+
+	if Respawning then
+		return
+	end
+
+	Respawning = true
+
+	-- Xóa target/path cũ
+	CurrentWatermelon = nil
+	ResetPath()
+
+	-- Dừng điều khiển cũ
+	if Humanoid then
+		Humanoid:Move(Vector3.zero)
+	end
+
+	--==================================================
+	-- Roblox respawn thông thường:
+	-- làm nhân vật chết để hệ thống SpawnLocation
+	-- tạo nhân vật mới.
+	--==================================================
+
+	if Humanoid
+	and Humanoid.Health > 0 then
+
+		Humanoid.Health = 0
+	end
+
+	-- Chờ CharacterAdded
+	local start =
+		tick()
+
+	while tick() - start
+		< 15 do
+
+		if Player.Character
+		and Player.Character
+			~= Character then
+
+			break
 		end
 
-		Humanoid:MoveTo(position)
+		task.wait(0.2)
+	end
 
-		task.wait(MOVE_INTERVAL)
+	-- Nếu Character mới đã có
+	if Player.Character
+	and Player.Character
+		~= Character then
+
+		SetupCharacter(
+			Player.Character
+		)
+	end
+
+	-- Chờ ổn định
+	task.wait(
+		RESPAWN_WAIT
+	)
+
+	-- Tính lại từ đầu
+	CurrentWatermelon = nil
+	ResetPath()
+
+	Respawning = false
+end
+
+--==================================================
+-- 🧍 STUCK DETECTOR
+--==================================================
+
+local LastPosition = nil
+local LastMoveTime = tick()
+
+local function ResetStuckDetector()
+
+	if Root then
+		LastPosition =
+			Root.Position
+	end
+
+	LastMoveTime =
+		tick()
+end
+
+local function CheckStuck()
+
+	if not Root then
+		return false
+	end
+
+	local currentPosition =
+		Root.Position
+
+	if not LastPosition then
+
+		LastPosition =
+			currentPosition
+
+		LastMoveTime =
+			tick()
+
+		return false
+	end
+
+	local moved =
+		(
+			currentPosition -
+			LastPosition
+		).Magnitude
+
+	-- Có di chuyển
+	if moved >= 0.5 then
+
+		LastPosition =
+			currentPosition
+
+		LastMoveTime =
+			tick()
+
+		return false
+	end
+
+	-- Không di chuyển quá 10 giây
+	if tick() - LastMoveTime
+		>= STUCK_TIME then
+
+		return true
 	end
 
 	return false
 end
 
 --==================================================
--- AUTO WATERMELON
+-- 🚶 FOLLOW PATH
 --==================================================
 
-task.spawn(function()
+local function FollowPath()
 
-	while true do
+	if not Root
+	or not Humanoid then
 
-		if AUTO_WATERMELON
-		and not AUTO_LIME
-		and Humanoid
-		and Root
-		and Humanoid.Health > 0 then
+		return false
+	end
 
+	if not CurrentWatermelon then
+		return false
+	end
+
+	if not CurrentWatermelon
+		:IsDescendantOf(
+			Workspace
+		) then
+
+		CurrentWatermelon =
+			nil
+
+		ResetPath()
+
+		return false
+	end
+
+	local part =
+		GetPart(
+			CurrentWatermelon
+		)
+
+	if not part then
+
+		CurrentWatermelon =
+			nil
+
+		ResetPath()
+
+		return false
+	end
+
+	--==================================================
+	-- Nếu chưa có path → tính path
+	--==================================================
+
+	if not PathWaypoints then
+
+		local success =
+			ComputePath(
+				part.Position
+			)
+
+		if not success then
+
+			-- Pathfinding thất bại:
+			-- thử MoveTo trực tiếp
 			SetSubSpeed()
 
-			if not CurrentWatermelon
-			or not CurrentWatermelon:IsDescendantOf(
+			Humanoid:MoveTo(
+				part.Position
+			)
+
+			return true
+		end
+	end
+
+	--==================================================
+	-- Kiểm tra target có đổi vị trí nhiều không
+	--==================================================
+
+	if LastPathTarget then
+
+		if (
+			LastPathTarget -
+			part.Position
+		).Magnitude > 8 then
+
+			ResetPath()
+
+			ComputePath(
+				part.Position
+			)
+		end
+	end
+
+	--==================================================
+	-- Waypoint
+	--==================================================
+
+	local waypoint =
+		PathWaypoints[
+			PathIndex
+		]
+
+	if not waypoint then
+
+		ResetPath()
+
+		return true
+	end
+
+	SetSubSpeed()
+
+	-- Jump waypoint
+	if waypoint.Action
+		== Enum.PathWaypointAction.Jump then
+
+		Humanoid.Jump = true
+	end
+
+	Humanoid:MoveTo(
+		waypoint.Position
+	)
+
+	local distance =
+		(
+			Root.Position -
+			waypoint.Position
+		).Magnitude
+
+	if distance
+		<= WAYPOINT_REACHED_DISTANCE then
+
+		PathIndex += 1
+	end
+
+	return true
+end
+
+--==================================================
+-- 🍉 AUTO WATERMELON CONTROLLER
+--==================================================
+
+local AutoRunning = false
+
+local function StartAutoWatermelon()
+
+	if AutoRunning then
+		return
+	end
+
+	AutoRunning = true
+
+	ResetStuckDetector()
+
+	while AUTO_WATERMELON do
+
+		--==================================================
+		-- Character check
+		--==================================================
+
+		if not CharacterReady
+		or not Character
+		or not Humanoid
+		or not Root
+		or Humanoid.Health <= 0 then
+
+			task.wait(0.5)
+			continue
+		end
+
+		--==================================================
+		-- Giữ Speed
+		--==================================================
+
+		SetSubSpeed()
+
+		--==================================================
+		-- Target check
+		--==================================================
+
+		if not CurrentWatermelon
+		or not CurrentWatermelon
+			:IsDescendantOf(
 				Workspace
 			) then
 
-				CurrentWatermelon =
-					GetNearestWatermelon()
-			end
+			CurrentWatermelon =
+				GetNearestWatermelon()
 
-			if CurrentWatermelon then
-
-				local part =
-					GetPart(CurrentWatermelon)
-
-				if part then
-
-					local distance =
-						(
-							Root.Position -
-							part.Position
-						).Magnitude
-
-					if distance <= TOUCH_DISTANCE then
-
-						-- đứng sát dưa
-						Humanoid:MoveTo(
-							part.Position
-						)
-
-						task.wait(0.15)
-
-						-- Nếu game phá dưa
-						-- bằng Touch thì ở đây
-						-- nhân vật đã chạm dưa.
-
-						if not CurrentWatermelon
-						:IsDescendantOf(Workspace) then
-
-							CurrentWatermelon = nil
-
-						else
-
-							-- kiểm tra lại
-							CurrentWatermelon =
-								GetNearestWatermelon()
-						end
-
-					else
-
-						Humanoid:MoveTo(
-							part.Position
-						)
-
-					end
-
-				else
-					CurrentWatermelon = nil
-				end
-
-			else
-				task.wait(SCAN_INTERVAL)
-			end
-
-		else
-			task.wait(0.2)
+			ResetPath()
+			ResetStuckDetector()
 		end
 
-		task.wait(MOVE_INTERVAL)
+		--==================================================
+		-- Không có dưa
+		--==================================================
+
+		if not CurrentWatermelon then
+
+			ResetPath()
+
+			task.wait(
+				0.5
+			)
+
+			continue
+		end
+
+		--==================================================
+		-- Target part
+		--==================================================
+
+		local part =
+			GetPart(
+				CurrentWatermelon
+			)
+
+		if not part then
+
+			CurrentWatermelon =
+				nil
+
+			ResetPath()
+
+			continue
+		end
+
+		--==================================================
+		-- Khoảng cách
+		--==================================================
+
+		local distance =
+			(
+				Root.Position -
+				part.Position
+			).Magnitude
+
+		--==================================================
+		-- Đã tới dưa
+		--==================================================
+
+		if distance
+			<= TOUCH_DISTANCE then
+
+			Humanoid:MoveTo(
+				part.Position
+			)
+
+			task.wait(0.2)
+
+			-- Nếu dưa biến mất
+			if not CurrentWatermelon
+				:IsDescendantOf(
+					Workspace
+				) then
+
+				CurrentWatermelon =
+					nil
+
+				ResetPath()
+
+			else
+
+				-- Có thể game cần thêm
+				-- một chút thời gian để
+				-- xử lý Touch.
+				task.wait(0.2)
+
+				if CurrentWatermelon
+					and CurrentWatermelon
+						:IsDescendantOf(
+							Workspace
+						) then
+
+					CurrentWatermelon =
+						GetNearestWatermelon()
+
+					ResetPath()
+				end
+			end
+
+			ResetStuckDetector()
+
+			continue
+		end
+
+		--==================================================
+		-- 🚨 CHECK KẸT
+		--==================================================
+
+		if CheckStuck() then
+
+			-- Tự respawn
+			RespawnBecauseStuck()
+
+			-- Sau respawn:
+			-- tìm dưa + path mới
+			CurrentWatermelon =
+				nil
+
+			ResetPath()
+			ResetStuckDetector()
+
+			continue
+		end
+
+		--==================================================
+		-- 🧭 ĐI THEO PATH
+		--==================================================
+
+		FollowPath()
+
+		task.wait(
+			0.12
+		)
 	end
-end)
+
+	--==================================================
+	-- STOP
+	--==================================================
+
+	CurrentWatermelon = nil
+	ResetPath()
+	AutoRunning = false
+
+	SetNormalSpeed()
+end
 
 --==================================================
--- FIND LIME
+-- 🍋 FIND LIME
 --==================================================
 
 local function FindLime()
@@ -455,8 +1006,11 @@ local function FindLime()
 		Workspace:GetDescendants()
 	) do
 
-		if string.lower(object.Name)
-			== string.lower(LIME_NAME) then
+		if string.lower(
+			object.Name
+		) == string.lower(
+			LIME_NAME
+		) then
 
 			if object:IsA("Model")
 			or object:IsA("BasePart") then
@@ -470,34 +1024,36 @@ local function FindLime()
 end
 
 --==================================================
--- FIND PROXIMITY PROMPT
+-- 🗣️ FIND LIME PROMPT
 --==================================================
 
-local function FindPrompt(object)
+local function FindLimePrompt(lime)
 
-	if not object then
+	if not lime then
 		return nil
 	end
 
-	return object:FindFirstChildWhichIsA(
+	return lime:FindFirstChildWhichIsA(
 		"ProximityPrompt",
 		true
 	)
 end
 
 --==================================================
--- TALK TO LIME
+-- 🍋 MOVE TO LIME
 --==================================================
 
-local function TalkToLime()
+local function MoveToLime()
 
-	local lime = FindLime()
+	local lime =
+		FindLime()
 
 	if not lime then
 		return false
 	end
 
-	local part = GetPart(lime)
+	local part =
+		GetPart(lime)
 
 	if not part then
 		return false
@@ -505,50 +1061,169 @@ local function TalkToLime()
 
 	SetNormalSpeed()
 
-	local reached =
-		MoveToPosition(
-			part.Position,
-			NORMAL_SPEED
-		)
+	-- Dùng pathfinding cho Lime
+	local path =
+		PathfindingService:CreatePath({
 
-	if not reached then
-		return false
-	end
+			AgentRadius = 2,
 
-	task.wait(0.5)
+			AgentHeight = 5,
 
-	local prompt =
-		FindPrompt(lime)
+			AgentCanJump = true,
 
-	if prompt then
+			AgentCanClimb = true,
 
-		-- Khi prompt ở gần, Roblox sẽ
-		-- cho phép người chơi kích hoạt
-		-- bằng Input nếu Prompt được thiết kế
-		-- trong game của bạn.
+			WaypointSpacing = 4
+		})
 
-		if prompt.Enabled then
+	local success =
+		pcall(function()
 
-			prompt:InputHoldBegin()
-
-			task.wait(
-				math.max(
-					prompt.HoldDuration,
-					0.1
-				)
+			path:ComputeAsync(
+				Root.Position,
+				part.Position
 			)
 
-			prompt:InputHoldEnd()
+		end)
 
-			return true
+	if success
+	and path.Status
+		== Enum.PathStatus.Success then
+
+		for _, waypoint in ipairs(
+			path:GetWaypoints()
+		) do
+
+			if not AUTO_LIME then
+				return false
+			end
+
+			if waypoint.Action
+				== Enum.PathWaypointAction.Jump then
+
+				Humanoid.Jump = true
+			end
+
+			Humanoid:MoveTo(
+				waypoint.Position
+			)
+
+			local start =
+				tick()
+
+			while AUTO_LIME
+			and Humanoid
+			and Root do
+
+				if (
+					Root.Position -
+					waypoint.Position
+				).Magnitude
+					<= WAYPOINT_REACHED_DISTANCE then
+
+					break
+				end
+
+				if tick() - start > 8 then
+					break
+				end
+
+				task.wait(0.15)
+			end
 		end
+
+	else
+
+		Humanoid:MoveTo(
+			part.Position
+		)
+
+		task.wait(1)
 	end
 
-	return false
+	return true
 end
 
 --==================================================
--- FIND GUI BUTTON BY TEXT / NAME
+-- 🗣️ TALK LIME
+--==================================================
+
+local function TalkToLime()
+
+	if not Humanoid
+	or not Root then
+		return false
+	end
+
+	local lime =
+		FindLime()
+
+	if not lime then
+		return false
+	end
+
+	local part =
+		GetPart(lime)
+
+	if not part then
+		return false
+	end
+
+	local distance =
+		(
+			Root.Position -
+			part.Position
+		).Magnitude
+
+	if distance > 8 then
+
+		MoveToLime()
+
+		task.wait(0.5)
+	end
+
+	local prompt =
+		FindLimePrompt(
+			lime
+		)
+
+	if not prompt then
+		return false
+	end
+
+	if not prompt.Enabled then
+		return false
+	end
+
+	--==================================================
+	-- Prompt chuẩn Roblox
+	--==================================================
+
+	if prompt.HoldDuration > 0 then
+
+		prompt:InputHoldBegin()
+
+		task.wait(
+			prompt.HoldDuration
+			+ 0.1
+		)
+
+		prompt:InputHoldEnd()
+
+	else
+
+		prompt:InputHoldBegin()
+
+		task.wait(0.1)
+
+		prompt:InputHoldEnd()
+	end
+
+	return true
+end
+
+--==================================================
+-- 🔘 FIND GUI BUTTON
 --==================================================
 
 local function FindButton(keywords)
@@ -561,11 +1236,16 @@ local function FindButton(keywords)
 		or object:IsA("ImageButton") then
 
 			local name =
-				string.lower(object.Name)
+				string.lower(
+					object.Name
+				)
 
 			local text = ""
 
-			if object:IsA("TextButton") then
+			if object:IsA(
+				"TextButton"
+			) then
+
 				text =
 					string.lower(
 						object.Text or ""
@@ -577,7 +1257,9 @@ local function FindButton(keywords)
 			) do
 
 				keyword =
-					string.lower(keyword)
+					string.lower(
+						keyword
+					)
 
 				if string.find(
 					name,
@@ -602,44 +1284,28 @@ local function FindButton(keywords)
 end
 
 --==================================================
--- CLICK GUI BUTTON
---==================================================
-
-local function ActivateButton(button)
-
-	if not button then
-		return false
-	end
-
-	if button:IsA("GuiButton") then
-
-		button:Activate()
-
-		return true
-	end
-
-	return false
-end
-
---==================================================
--- MINIGAME BUTTON
+-- 🎮 CLICK MINIGAME
 --==================================================
 
 local function ClickMinigame()
 
-	-- ảnh của bạn cho thấy:
-	-- [ Minigame ]
-
 	local button =
 		FindButton({
+
 			"minigame",
 			"mini game",
 			"mini-game"
 		})
 
-	if button then
+	if not button then
+		return false
+	end
 
-		ActivateButton(button)
+	if button:IsA(
+		"GuiButton"
+	) then
+
+		button:Activate()
 
 		task.wait(1)
 
@@ -650,64 +1316,66 @@ local function ClickMinigame()
 end
 
 --==================================================
--- AUTO LIME
+-- 🍋 AUTO LIME LOOP
 --==================================================
 
-local LimeBusy = false
+local LimeRunning = false
 
-local function RunLime()
+local function StartAutoLime()
 
-	if LimeBusy then
+	if LimeRunning then
 		return
 	end
 
-	LimeBusy = true
+	LimeRunning = true
 
-	-- Dừng auto dưa
-	CurrentWatermelon = nil
+	while AUTO_LIME do
 
-	-- Đi Lime + Talk
-	local talked =
-		TalkToLime()
+		if not CharacterReady
+		or not Humanoid
+		or not Root then
 
-	if talked then
+			task.wait(0.5)
+			continue
+		end
 
-		task.wait(0.8)
+		SetNormalSpeed()
 
-		-- Bấm Minigame
-		ClickMinigame()
+		local lime =
+			FindLime()
 
-		task.wait(1)
+		if not lime then
 
-	end
+			task.wait(1)
 
-	LimeBusy = false
-end
+			continue
+		end
 
---==================================================
--- AUTO LIME LOOP
---==================================================
+		MoveToLime()
 
-task.spawn(function()
-
-	while true do
-
-		if AUTO_LIME then
-
-			RunLime()
-
-		else
-
-			task.wait(0.3)
-
+		if not AUTO_LIME then
+			break
 		end
 
 		task.wait(0.5)
+
+		TalkToLime()
+
+		task.wait(0.8)
+
+		if AUTO_LIME then
+			ClickMinigame()
+		end
+
+		-- Không spam click Lime.
+		task.wait(2)
 	end
-end)
+
+	LimeRunning = false
+end
 
 --==================================================
--- GUI
+-- 🎨 GUI
 --==================================================
 
 local ScreenGui =
@@ -716,8 +1384,11 @@ local ScreenGui =
 ScreenGui.Name =
 	"SolRNG_Watermelon_V1"
 
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = PlayerGui
+ScreenGui.ResetOnSpawn =
+	false
+
+ScreenGui.Parent =
+	PlayerGui
 
 --==================================================
 -- MAIN
@@ -727,7 +1398,10 @@ local Main =
 	Instance.new("Frame")
 
 Main.Size =
-	UDim2.fromOffset(290, 360)
+	UDim2.fromOffset(
+		290,
+		360
+	)
 
 Main.Position =
 	UDim2.new(
@@ -751,9 +1425,13 @@ local MainCorner =
 	Instance.new("UICorner")
 
 MainCorner.CornerRadius =
-	UDim.new(0, 12)
+	UDim.new(
+		0,
+		12
+	)
 
-MainCorner.Parent = Main
+MainCorner.Parent =
+	Main
 
 --==================================================
 -- TITLE
@@ -771,9 +1449,13 @@ Title.Size =
 	)
 
 Title.Position =
-	UDim2.fromOffset(12, 2)
+	UDim2.fromOffset(
+		12,
+		2
+	)
 
-Title.BackgroundTransparency = 1
+Title.BackgroundTransparency =
+	1
 
 Title.Text =
 	"🍉 SolRNG Watermelon V1"
@@ -786,13 +1468,15 @@ Title.TextColor3 =
 	)
 
 Title.TextSize = 17
+
 Title.Font =
 	Enum.Font.GothamBold
 
 Title.TextXAlignment =
 	Enum.TextXAlignment.Left
 
-Title.Parent = Main
+Title.Parent =
+	Main
 
 --==================================================
 -- CREDIT
@@ -810,9 +1494,13 @@ Credit.Size =
 	)
 
 Credit.Position =
-	UDim2.fromOffset(12, 35)
+	UDim2.fromOffset(
+		12,
+		35
+	)
 
-Credit.BackgroundTransparency = 1
+Credit.BackgroundTransparency =
+	1
 
 Credit.Text =
 	"by sarry_fixe"
@@ -825,68 +1513,18 @@ Credit.TextColor3 =
 	)
 
 Credit.TextSize = 11
+
 Credit.Font =
 	Enum.Font.Gotham
 
 Credit.TextXAlignment =
 	Enum.TextXAlignment.Left
 
-Credit.Parent = Main
+Credit.Parent =
+	Main
 
 --==================================================
--- HIDE
---==================================================
-
-local Hide =
-	Instance.new("TextButton")
-
-Hide.Size =
-	UDim2.fromOffset(30, 30)
-
-Hide.Position =
-	UDim2.new(
-		1,
-		-37,
-		0,
-		7
-	)
-
-Hide.BackgroundColor3 =
-	Color3.fromRGB(
-		45,
-		45,
-		52
-	)
-
-Hide.Text = "−"
-
-Hide.TextColor3 =
-	Color3.fromRGB(
-		255,
-		255,
-		255
-	)
-
-Hide.TextSize = 20
-Hide.Font =
-	Enum.Font.GothamBold
-
-Hide.Parent = Main
-
-local function MakeCorner(object)
-	local corner =
-		Instance.new("UICorner")
-
-	corner.CornerRadius =
-		UDim.new(0, 8)
-
-	corner.Parent = object
-end
-
-MakeCorner(Hide)
-
---==================================================
--- BUTTON CREATOR
+-- BUTTON HELPER
 --==================================================
 
 local function CreateButton(
@@ -895,7 +1533,9 @@ local function CreateButton(
 )
 
 	local button =
-		Instance.new("TextButton")
+		Instance.new(
+			"TextButton"
+		)
 
 	button.Size =
 		UDim2.new(
@@ -930,17 +1570,31 @@ local function CreateButton(
 	button.Font =
 		Enum.Font.GothamBold
 
-	button.Text = text
+	button.Text =
+		text
 
-	button.Parent = Main
+	button.Parent =
+		Main
 
-	MakeCorner(button)
+	local corner =
+		Instance.new(
+			"UICorner"
+		)
+
+	corner.CornerRadius =
+		UDim.new(
+			0,
+			8
+		)
+
+	corner.Parent =
+		button
 
 	return button
 end
 
 --==================================================
--- ESP BUTTON
+-- 🍉 ESP BUTTON
 --==================================================
 
 local ESPButton =
@@ -949,11 +1603,11 @@ local ESPButton =
 		65
 	)
 
-local function UpdateESPButton()
+local function UpdateESP()
 
 	ESPButton.Text =
-		"🍉 Định vị dưa: " ..
-		(
+		"🍉 Định vị dưa: "
+		.. (
 			ESP_ENABLED
 			and "ON"
 			or "OFF"
@@ -976,77 +1630,100 @@ ESPButton.MouseButton1Click:Connect(
 				Workspace:GetDescendants()
 			) do
 
-				if IsWatermelon(object) then
-					RemoveESP(object)
+				if IsWatermelon(
+					object
+				) then
+
+					RemoveESP(
+						object
+					)
 				end
 			end
 		end
 
-		UpdateESPButton()
+		UpdateESP()
 	end
 )
 
 --==================================================
--- AUTO WATERMELON BUTTON
+-- 🤖 AUTO WATERMELON
 --==================================================
 
-local AutoWatermelonButton =
+local AutoButton =
 	CreateButton(
 		"🤖 Auto tìm dưa: OFF",
 		113
 	)
 
-local function UpdateAutoWatermelon()
+local function UpdateAuto()
 
-	AutoWatermelonButton.Text =
-		"🤖 Auto tìm dưa: " ..
-		(
+	AutoButton.Text =
+		"🤖 Auto tìm dưa: "
+		.. (
 			AUTO_WATERMELON
 			and "ON"
 			or "OFF"
 		)
 end
 
-AutoWatermelonButton.MouseButton1Click:Connect(
+AutoButton.MouseButton1Click:Connect(
 	function()
 
 		AUTO_WATERMELON =
 			not AUTO_WATERMELON
 
 		if AUTO_WATERMELON then
+
+			-- Auto dưa không chạy
+			-- cùng lúc với Lime.
 			AUTO_LIME = false
-			CurrentWatermelon = nil
+
+			CurrentWatermelon =
+				nil
+
+			ResetPath()
+
+			task.spawn(
+				StartAutoWatermelon
+			)
+
 		else
+
+			CurrentWatermelon =
+				nil
+
+			ResetPath()
+
 			SetNormalSpeed()
 		end
 
-		UpdateAutoWatermelon()
-		UpdateAutoLime()
+		UpdateAuto()
+		UpdateLime()
 	end
 )
 
 --==================================================
--- LIME BUTTON
+-- 🍋 LIME
 --==================================================
 
-local AutoLimeButton =
+local LimeButton =
 	CreateButton(
 		"🍋 Đi tới Lime: OFF",
 		161
 	)
 
-function UpdateAutoLime()
+function UpdateLime()
 
-	AutoLimeButton.Text =
-		"🍋 Đi tới Lime: " ..
-		(
+	LimeButton.Text =
+		"🍋 Đi tới Lime: "
+		.. (
 			AUTO_LIME
 			and "ON"
 			or "OFF"
 		)
 end
 
-AutoLimeButton.MouseButton1Click:Connect(
+LimeButton.MouseButton1Click:Connect(
 	function()
 
 		AUTO_LIME =
@@ -1054,24 +1731,32 @@ AutoLimeButton.MouseButton1Click:Connect(
 
 		if AUTO_LIME then
 
-			-- Không chạy dưa cùng lúc
-			AUTO_WATERMELON = false
-			CurrentWatermelon = nil
+			AUTO_WATERMELON =
+				false
+
+			CurrentWatermelon =
+				nil
+
+			ResetPath()
 
 			SetNormalSpeed()
+
+			task.spawn(
+				StartAutoLime
+			)
 
 		else
 
 			SetNormalSpeed()
 		end
 
-		UpdateAutoLime()
-		UpdateAutoWatermelon()
+		UpdateLime()
+		UpdateAuto()
 	end
 )
 
 --==================================================
--- SPEED LABEL
+-- 🚀 SPEED LABEL
 --==================================================
 
 local SpeedLabel =
@@ -1091,7 +1776,8 @@ SpeedLabel.Position =
 		210
 	)
 
-SpeedLabel.BackgroundTransparency = 1
+SpeedLabel.BackgroundTransparency =
+	1
 
 SpeedLabel.Text =
 	"🚀 SubSpeed — 1 đến 100"
@@ -1111,10 +1797,11 @@ SpeedLabel.Font =
 SpeedLabel.TextXAlignment =
 	Enum.TextXAlignment.Left
 
-SpeedLabel.Parent = Main
+SpeedLabel.Parent =
+	Main
 
 --==================================================
--- SPEED BOX
+-- 🔢 SPEED BOX
 --==================================================
 
 local SpeedBox =
@@ -1142,10 +1829,12 @@ SpeedBox.BackgroundColor3 =
 	)
 
 SpeedBox.Text =
-	tostring(SUB_SPEED)
+	tostring(
+		SUB_SPEED
+	)
 
 SpeedBox.PlaceholderText =
-	"Nhập tốc độ 1 - 100"
+	"Nhập 1 - 100"
 
 SpeedBox.TextColor3 =
 	Color3.fromRGB(
@@ -1159,11 +1848,25 @@ SpeedBox.TextSize = 14
 SpeedBox.Font =
 	Enum.Font.GothamBold
 
-SpeedBox.ClearTextOnFocus = false
+SpeedBox.ClearTextOnFocus =
+	false
 
-SpeedBox.Parent = Main
+SpeedBox.Parent =
+	Main
 
-MakeCorner(SpeedBox)
+local SpeedCorner =
+	Instance.new(
+		"UICorner"
+	)
+
+SpeedCorner.CornerRadius =
+	UDim.new(
+		0,
+		8
+	)
+
+SpeedCorner.Parent =
+	SpeedBox
 
 SpeedBox.FocusLost:Connect(
 	function()
@@ -1176,22 +1879,29 @@ SpeedBox.FocusLost:Connect(
 		if not value then
 
 			SpeedBox.Text =
-				tostring(SUB_SPEED)
+				tostring(
+					SUB_SPEED
+				)
 
 			return
 		end
 
 		value =
 			math.clamp(
-				math.floor(value),
+				math.floor(
+					value
+				),
 				1,
 				100
 			)
 
-		SUB_SPEED = value
+		SUB_SPEED =
+			value
 
 		SpeedBox.Text =
-			tostring(SUB_SPEED)
+			tostring(
+				SUB_SPEED
+			)
 
 		if AUTO_WATERMELON then
 			SetSubSpeed()
@@ -1200,11 +1910,13 @@ SpeedBox.FocusLost:Connect(
 )
 
 --==================================================
--- STATUS
+-- 📊 STATUS
 --==================================================
 
 local Status =
-	Instance.new("TextLabel")
+	Instance.new(
+		"TextLabel"
+	)
 
 Status.Size =
 	UDim2.new(
@@ -1239,21 +1951,99 @@ Status.TextSize = 12
 Status.Font =
 	Enum.Font.Gotham
 
-Status.TextWrapped = true
+Status.TextWrapped =
+	true
 
 Status.Text =
 	"Status: IDLE"
 
-Status.Parent = Main
+Status.Parent =
+	Main
 
-MakeCorner(Status)
+local StatusCorner =
+	Instance.new(
+		"UICorner"
+	)
+
+StatusCorner.CornerRadius =
+	UDim.new(
+		0,
+		8
+	)
+
+StatusCorner.Parent =
+	Status
 
 --==================================================
--- SHOW BUTTON
+-- ➖ HIDE
+--==================================================
+
+local Hide =
+	Instance.new(
+		"TextButton"
+	)
+
+Hide.Size =
+	UDim2.fromOffset(
+		30,
+		30
+	)
+
+Hide.Position =
+	UDim2.new(
+		1,
+		-37,
+		0,
+		7
+	)
+
+Hide.BackgroundColor3 =
+	Color3.fromRGB(
+		45,
+		45,
+		52
+	)
+
+Hide.Text =
+	"−"
+
+Hide.TextColor3 =
+	Color3.fromRGB(
+		255,
+		255,
+		255
+	)
+
+Hide.TextSize = 20
+
+Hide.Font =
+	Enum.Font.GothamBold
+
+Hide.Parent =
+	Main
+
+local HideCorner =
+	Instance.new(
+		"UICorner"
+	)
+
+HideCorner.CornerRadius =
+	UDim.new(
+		0,
+		8
+	)
+
+HideCorner.Parent =
+	Hide
+
+--==================================================
+-- 👁️ SHOW
 --==================================================
 
 local Show =
-	Instance.new("TextButton")
+	Instance.new(
+		"TextButton"
+	)
 
 Show.Size =
 	UDim2.fromOffset(
@@ -1276,39 +2066,55 @@ Show.BackgroundColor3 =
 		30
 	)
 
-Show.Text = "🍉"
+Show.Text =
+	"🍉"
+
 Show.TextSize = 27
 
-Show.Visible = false
+Show.Visible =
+	false
 
-Show.Parent = ScreenGui
+Show.Parent =
+	ScreenGui
 
 local ShowCorner =
-	Instance.new("UICorner")
+	Instance.new(
+		"UICorner"
+	)
 
 ShowCorner.CornerRadius =
-	UDim.new(1, 0)
+	UDim.new(
+		1,
+		0
+	)
 
-ShowCorner.Parent = Show
+ShowCorner.Parent =
+	Show
 
 Hide.MouseButton1Click:Connect(
 	function()
 
-		Main.Visible = false
-		Show.Visible = true
+		Main.Visible =
+			false
+
+		Show.Visible =
+			true
 	end
 )
 
 Show.MouseButton1Click:Connect(
 	function()
 
-		Main.Visible = true
-		Show.Visible = false
+		Main.Visible =
+			true
+
+		Show.Visible =
+			false
 	end
 )
 
 --==================================================
--- DRAG MENU
+-- 🖱️ DRAG MENU
 --==================================================
 
 local Dragging = false
@@ -1318,30 +2124,34 @@ local StartPosition
 Title.InputBegan:Connect(
 	function(input)
 
-		if input.UserInputType ==
-			Enum.UserInputType.MouseButton1
-			or input.UserInputType ==
-			Enum.UserInputType.Touch then
+		if input.UserInputType
+			== Enum.UserInputType.MouseButton1
+			or input.UserInputType
+			== Enum.UserInputType.Touch then
 
-			Dragging = true
-			DragStart = input.Position
+			Dragging =
+				true
+
+			DragStart =
+				input.Position
+
 			StartPosition =
 				Main.Position
 		end
 	end
 )
 
-UserInputService.InputChanged:Connect(
+UIS.InputChanged:Connect(
 	function(input)
 
 		if not Dragging then
 			return
 		end
 
-		if input.UserInputType ==
-			Enum.UserInputType.MouseMovement
-			or input.UserInputType ==
-			Enum.UserInputType.Touch then
+		if input.UserInputType
+			== Enum.UserInputType.MouseMovement
+			or input.UserInputType
+			== Enum.UserInputType.Touch then
 
 			local delta =
 				input.Position -
@@ -1349,40 +2159,45 @@ UserInputService.InputChanged:Connect(
 
 			Main.Position =
 				UDim2.new(
+
 					StartPosition.X.Scale,
-					StartPosition.X.Offset +
-						delta.X,
+
+					StartPosition.X.Offset
+						+ delta.X,
 
 					StartPosition.Y.Scale,
-					StartPosition.Y.Offset +
-						delta.Y
+
+					StartPosition.Y.Offset
+						+ delta.Y
 				)
 		end
 	end
 )
 
-UserInputService.InputEnded:Connect(
+UIS.InputEnded:Connect(
 	function(input)
 
-		if input.UserInputType ==
-			Enum.UserInputType.MouseButton1
-			or input.UserInputType ==
-			Enum.UserInputType.Touch then
+		if input.UserInputType
+			== Enum.UserInputType.MouseButton1
+			or input.UserInputType
+			== Enum.UserInputType.Touch then
 
-			Dragging = false
+			Dragging =
+				false
 		end
 	end
 )
 
 --==================================================
--- STATUS LOOP
+-- 📊 STATUS LOOP
 --==================================================
 
 task.spawn(function()
 
 	while ScreenGui.Parent do
 
-		local target = "Không có"
+		local target =
+			"Không có"
 
 		if CurrentWatermelon
 		and CurrentWatermelon.Parent then
@@ -1391,28 +2206,43 @@ task.spawn(function()
 				CurrentWatermelon.Name
 		end
 
-		local state = "IDLE"
+		local state =
+			"IDLE"
 
-		if AUTO_LIME then
-			state = "ĐANG TỚI LIME"
+		if Respawning then
+
+			state =
+				"RESPAWN / CHỐNG KẸT"
+
+		elseif AUTO_LIME then
+
+			state =
+				"ĐANG TỚI LIME"
+
 		elseif AUTO_WATERMELON then
-			state = "ĐANG TÌM DƯA"
+
+			state =
+				"ĐANG TÌM DƯA"
 		end
 
 		Status.Text =
-			"Status: " ..
-			state ..
-			"\nDưa: " ..
-			target ..
-			" | Speed: " ..
-			tostring(SUB_SPEED)
+			"Status: "
+			.. state
+			.. "\nDưa: "
+			.. target
+			.. " | Speed: "
+			.. tostring(
+				SUB_SPEED
+			)
 
-		task.wait(0.25)
+		task.wait(
+			0.25
+		)
 	end
 end)
 
 --==================================================
--- ESP SCAN LOOP
+-- 🔄 ESP LOOP
 --==================================================
 
 task.spawn(function()
@@ -1423,12 +2253,14 @@ task.spawn(function()
 			GetWatermelons()
 		end
 
-		task.wait(1)
+		task.wait(
+			1
+		)
 	end
 end)
 
 --==================================================
--- CLEAN TARGET
+-- 🧹 TARGET CLEANUP
 --==================================================
 
 Workspace.DescendantRemoving:Connect(
@@ -1437,13 +2269,16 @@ Workspace.DescendantRemoving:Connect(
 		if object ==
 			CurrentWatermelon then
 
-			CurrentWatermelon = nil
+			CurrentWatermelon =
+				nil
+
+			ResetPath()
 		end
 	end
 )
 
 --==================================================
--- START
+-- 🚀 INITIAL
 --==================================================
 
 GetWatermelons()
