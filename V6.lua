@@ -1530,7 +1530,7 @@ task.spawn(function()
 			.. " | Speed: "
 			.. tostring(SUB_SPEED)
 
-		task.wait(0.25)
+		task.wait(0.10)
 	end
 end)
 
