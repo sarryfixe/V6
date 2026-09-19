@@ -57,8 +57,138 @@ local OldLighting = {
 }
 
 --==================================================
--- DARK MAP
+-- 🌑 DARK MAP - BLACK EVERYTHING
 --==================================================
+
+local DarkOriginals = {}
+local DarkTerrainOriginals = {}
+
+local function IsCharacterPart(obj)
+	if not obj:IsA("BasePart") then
+		return false
+	end
+
+	local model = obj:FindFirstAncestorOfClass("Model")
+
+	if model and Players:GetPlayerFromCharacter(model) then
+		return true
+	end
+
+	return false
+end
+
+local function SavePart(obj)
+	if DarkOriginals[obj] then
+		return
+	end
+
+	DarkOriginals[obj] = {
+		Color = obj.Color,
+		Material = obj.Material
+	}
+end
+
+local function DarkenPart(obj)
+
+	if not obj:IsA("BasePart") then
+		return
+	end
+
+	if IsCharacterPart(obj) then
+		return
+	end
+
+	SavePart(obj)
+
+	obj.Color = Color3.fromRGB(0,0,0)
+	obj.Material = Enum.Material.SmoothPlastic
+end
+
+local function DarkenTerrain()
+
+	local terrain = workspace:FindFirstChildOfClass("Terrain")
+
+	if not terrain then
+		return
+	end
+
+	for _,material in ipairs(Enum.Material:GetEnumItems()) do
+
+		local success,color = pcall(function()
+			return terrain:GetMaterialColor(material)
+		end)
+
+		if success then
+			DarkTerrainOriginals[material] = color
+
+			pcall(function()
+				terrain:SetMaterialColor(
+					material,
+					Color3.fromRGB(0,0,0)
+				)
+			end)
+		end
+	end
+end
+
+local function RestoreDarkMap()
+
+	-- Khôi phục Part
+	for object,data in pairs(DarkOriginals) do
+
+		if object and object.Parent then
+
+			object.Color = data.Color
+			object.Material = data.Material
+
+		end
+	end
+
+	table.clear(DarkOriginals)
+
+	-- Khôi phục Terrain
+	local terrain =
+		workspace:FindFirstChildOfClass("Terrain")
+
+	if terrain then
+
+		for material,color in pairs(DarkTerrainOriginals) do
+
+			pcall(function()
+
+				terrain:SetMaterialColor(
+					material,
+					color
+				)
+
+			end)
+		end
+	end
+
+	table.clear(DarkTerrainOriginals)
+
+	-- Khôi phục Lighting
+	Lighting.Brightness =
+		OldLighting.Brightness
+
+	Lighting.Ambient =
+		OldLighting.Ambient
+
+	Lighting.OutdoorAmbient =
+		OldLighting.OutdoorAmbient
+
+	Lighting.ExposureCompensation =
+		OldLighting.ExposureCompensation
+
+	Lighting.FogColor =
+		OldLighting.FogColor
+
+	Lighting.FogStart =
+		OldLighting.FogStart
+
+	Lighting.FogEnd =
+		OldLighting.FogEnd
+end
 
 local function SetDarkMap(enabled)
 
@@ -66,6 +196,7 @@ local function SetDarkMap(enabled)
 
 	if enabled then
 
+		-- Lighting đen
 		Lighting.Brightness = 0
 		Lighting.Ambient = Color3.fromRGB(0,0,0)
 		Lighting.OutdoorAmbient = Color3.fromRGB(0,0,0)
@@ -75,16 +206,19 @@ local function SetDarkMap(enabled)
 		Lighting.FogStart = 0
 		Lighting.FogEnd = 100000
 
+		-- Làm toàn bộ map đen
+		for _,object in ipairs(workspace:GetDescendants()) do
+
+			DarkenPart(object)
+
+		end
+
+		-- Làm Terrain đen
+		DarkenTerrain()
+
 	else
 
-		Lighting.Brightness = OldLighting.Brightness
-		Lighting.Ambient = OldLighting.Ambient
-		Lighting.OutdoorAmbient = OldLighting.OutdoorAmbient
-		Lighting.ExposureCompensation = OldLighting.ExposureCompensation
-
-		Lighting.FogColor = OldLighting.FogColor
-		Lighting.FogStart = OldLighting.FogStart
-		Lighting.FogEnd = OldLighting.FogEnd
+		RestoreDarkMap()
 
 	end
 end
