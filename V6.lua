@@ -1,7 +1,7 @@
 --==================================================
 -- 🍉 SARRY HUB V1
 -- by sarry_fixe
--- ONE SCRIPT - ROBLOX STUDIO
+-- ROBLOX STUDIO - ONE SCRIPT
 --==================================================
 
 local Players = game:GetService("Players")
@@ -23,26 +23,23 @@ local AUTO_ENABLED = false
 local SPEED_ENABLED = false
 
 local SUB_SPEED = 30
-local BOOST_SPEED = 50
 local DEFAULT_SPEED = 16
 
 local TARGET = nil
+
+local PATH = nil
 local WAYPOINTS = {}
 local WAYPOINT_INDEX = 1
 
-local PATH = nil
-local PATH_BUSY = false
+local LAST_REPATH = 0
+local REPATH_TIME = 0.35
 
-local STUCK_TIME = 0
 local LAST_POSITION = nil
+local STUCK_TIME = 0
 local STUCK_LIMIT = 10
 
-local TARGET_REACHED_DISTANCE = 6
 local DIRECT_DISTANCE = 6
 local FINAL_DISTANCE = 2.5
-
-local REPATH_TIME = 0.35
-local LAST_REPATH = 0
 
 --==================================================
 -- GUI
@@ -53,10 +50,14 @@ Gui.Name = "SarryHub"
 Gui.ResetOnSpawn = false
 Gui.Parent = PlayerGui
 
+--==================================================
+-- MENU
+--==================================================
+
 local Menu = Instance.new("Frame")
 Menu.Name = "Menu"
-Menu.Size = UDim2.fromOffset(340, 430)
-Menu.Position = UDim2.new(0.5, -170, 0.5, -215)
+Menu.Size = UDim2.fromOffset(340,430)
+Menu.Position = UDim2.new(0.5,-170,0.5,-215)
 Menu.BackgroundColor3 = Color3.fromRGB(24,24,29)
 Menu.BorderSizePixel = 0
 Menu.Parent = Gui
@@ -74,20 +75,20 @@ MenuStroke.Parent = Menu
 -- DRAG
 --==================================================
 
-local function MakeDraggable(Object)
+local function MakeDraggable(object)
 
 	local dragging = false
 	local dragStart
-	local startPos
+	local startPosition
 
-	Object.InputBegan:Connect(function(input)
+	object.InputBegan:Connect(function(input)
 
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
 
 			dragging = true
 			dragStart = input.Position
-			startPos = Object.Position
+			startPosition = object.Position
 
 			input.Changed:Connect(function()
 
@@ -96,6 +97,7 @@ local function MakeDraggable(Object)
 				end
 
 			end)
+
 		end
 
 	end)
@@ -111,17 +113,18 @@ local function MakeDraggable(Object)
 
 			local delta = input.Position - dragStart
 
-			Object.Position = UDim2.new(
-				startPos.X.Scale,
-				startPos.X.Offset + delta.X,
+			object.Position = UDim2.new(
+				startPosition.X.Scale,
+				startPosition.X.Offset + delta.X,
 
-				startPos.Y.Scale,
-				startPos.Y.Offset + delta.Y
+				startPosition.Y.Scale,
+				startPosition.Y.Offset + delta.Y
 			)
 
 		end
 
 	end)
+
 end
 
 MakeDraggable(Menu)
@@ -153,7 +156,7 @@ Credit.TextXAlignment = Enum.TextXAlignment.Left
 Credit.Parent = Menu
 
 --==================================================
--- HIDE BUTTON
+-- HIDE
 --==================================================
 
 local HideButton = Instance.new("TextButton")
@@ -180,15 +183,12 @@ local function CreateButton(text,y)
 
 	button.Size = UDim2.new(1,-30,0,50)
 	button.Position = UDim2.fromOffset(15,y)
-
 	button.BackgroundColor3 = Color3.fromRGB(40,40,48)
 	button.BorderSizePixel = 0
-
 	button.Text = text
 	button.TextColor3 = Color3.new(1,1,1)
 	button.TextSize = 16
 	button.Font = Enum.Font.GothamBold
-
 	button.Parent = Menu
 
 	local corner = Instance.new("UICorner")
@@ -215,7 +215,7 @@ local SubSpeedButton =
 	CreateButton("🔢 SubSpeed : "..SUB_SPEED,265)
 
 --==================================================
--- SPEED +/- 
+-- SUB SPEED BUTTONS
 --==================================================
 
 local MinusButton = Instance.new("TextButton")
@@ -240,9 +240,9 @@ PlusButton.Parent = Menu
 
 for _,button in ipairs({MinusButton,PlusButton}) do
 
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0,10)
-	c.Parent = button
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0,10)
+	corner.Parent = button
 
 end
 
@@ -270,10 +270,6 @@ AvatarStroke.Parent = Avatar
 
 MakeDraggable(Avatar)
 
---==================================================
--- HIDE / SHOW
---==================================================
-
 HideButton.MouseButton1Click:Connect(function()
 	Menu.Visible = false
 	Avatar.Visible = true
@@ -289,9 +285,7 @@ end)
 --==================================================
 
 local function GetCharacter()
-
 	return Player.Character
-
 end
 
 local function GetHumanoid()
@@ -303,7 +297,6 @@ local function GetHumanoid()
 	end
 
 	return character:FindFirstChildOfClass("Humanoid")
-
 end
 
 local function GetRoot()
@@ -315,76 +308,122 @@ local function GetRoot()
 	end
 
 	return character:FindFirstChild("HumanoidRootPart")
-
 end
 
 --==================================================
--- WATERMELON CHECK
+-- WATERMELON DETECTION
 --==================================================
 
 local function IsWatermelon(object)
 
-	if not object:IsA("BasePart") then
+	if not object:IsA("BasePart")
+		and not object:IsA("Model") then
 		return false
 	end
 
 	local name = string.lower(object.Name)
 
-	if string.find(name,"watermelon") then
-		return true
+	return string.find(name,"watermelon",1,true) ~= nil
+		or string.find(name,"melon",1,true) ~= nil
+		or string.find(name,"duahau",1,true) ~= nil
+		or string.find(name,"dua",1,true) ~= nil
+end
+
+local function GetWatermelonPart(object)
+
+	if object:IsA("BasePart") then
+		return object
 	end
 
-	if string.find(name,"melon") then
-		return true
+	if object:IsA("Model") then
+
+		if object.PrimaryPart then
+			return object.PrimaryPart
+		end
+
+		return object:FindFirstChildWhichIsA(
+			"BasePart",
+			true
+		)
 	end
 
-	if string.find(name,"duahau") then
-		return true
+	return nil
+end
+
+local function GetObjectPosition(object)
+
+	local part = GetWatermelonPart(object)
+
+	if part then
+		return part.Position
 	end
 
-	if string.find(name,"dua") then
-		return true
-	end
-
-	return false
+	return nil
 end
 
 --==================================================
--- ESP
+-- 🔴 RED DOT LOCATOR
 --==================================================
 
-local ESPFolder = Instance.new("Folder")
-ESPFolder.Name = "SarryESP"
-ESPFolder.Parent = Gui
+local LocatorFolder = Instance.new("Folder")
+LocatorFolder.Name = "WatermelonLocator"
+LocatorFolder.Parent = Gui
 
-local function ClearESP()
+local function ClearLocator()
 
-	for _,object in ipairs(ESPFolder:GetChildren()) do
+	for _,object in ipairs(LocatorFolder:GetChildren()) do
 		object:Destroy()
 	end
 
 end
 
-local function AddESP(object)
+local function CreateRedDot(object)
 
-	if not IsWatermelon(object) then
+	local part = GetWatermelonPart(object)
+
+	if not part then
 		return
 	end
 
-	local highlight = Instance.new("Highlight")
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "SarryRedDot"
 
-	highlight.Name = "WatermelonESP"
-	highlight.Adornee = object
-	highlight.FillTransparency = 0.45
-	highlight.OutlineTransparency = 0
+	attachment.Position = Vector3.new(
+		0,
+		(part.Size.Y / 2) + 1.5,
+		0
+	)
 
-	highlight.Parent = ESPFolder
+	attachment.Parent = part
 
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "RedDot"
+	billboard.Adornee = attachment
+	billboard.Size = UDim2.fromOffset(16,16)
+	billboard.AlwaysOnTop = true
+	billboard.LightInfluence = 0
+	billboard.MaxDistance = 10000
+	billboard.Parent = LocatorFolder
+
+	local dot = Instance.new("Frame")
+	dot.Size = UDim2.fromScale(1,1)
+	dot.BackgroundColor3 = Color3.fromRGB(255,0,0)
+	dot.BorderSizePixel = 0
+	dot.Parent = billboard
+
+	local dotCorner = Instance.new("UICorner")
+	dotCorner.CornerRadius = UDim.new(1,0)
+	dotCorner.Parent = dot
+
+	local dotStroke = Instance.new("UIStroke")
+	dotStroke.Thickness = 1
+	dotStroke.Color = Color3.new(1,1,1)
+	dotStroke.Parent = dot
 end
 
-local function UpdateESP()
+local function UpdateLocator()
 
-	ClearESP()
+	ClearLocator()
 
 	if not ESP_ENABLED then
 		return
@@ -393,7 +432,7 @@ local function UpdateESP()
 	for _,object in ipairs(workspace:GetDescendants()) do
 
 		if IsWatermelon(object) then
-			AddESP(object)
+			CreateRedDot(object)
 		end
 
 	end
@@ -404,17 +443,21 @@ ESPButton.MouseButton1Click:Connect(function()
 	ESP_ENABLED = not ESP_ENABLED
 
 	if ESP_ENABLED then
+
 		ESPButton.Text = "🍉 ESP Dưa hấu : ON"
-		UpdateESP()
+		UpdateLocator()
+
 	else
+
 		ESPButton.Text = "🍉 ESP Dưa hấu : OFF"
-		ClearESP()
+		ClearLocator()
+
 	end
 
 end)
 
 --==================================================
--- FIND TARGET
+-- FIND NEAREST WATERMELON
 --==================================================
 
 local function FindNearestWatermelon()
@@ -432,25 +475,29 @@ local function FindNearestWatermelon()
 
 		if IsWatermelon(object) then
 
-			local distance =
-				(object.Position-root.Position).Magnitude
+			local position = GetObjectPosition(object)
 
-			if distance < closestDistance then
+			if position then
 
-				closestDistance = distance
-				closest = object
+				local distance =
+					(position-root.Position).Magnitude
+
+				if distance < closestDistance then
+
+					closestDistance = distance
+					closest = object
+
+				end
 
 			end
-
 		end
-
 	end
 
 	return closest
 end
 
 --==================================================
--- CLEAR PATH
+-- PATH RESET
 --==================================================
 
 local function ClearPath()
@@ -458,7 +505,6 @@ local function ClearPath()
 	PATH = nil
 	WAYPOINTS = {}
 	WAYPOINT_INDEX = 1
-	PATH_BUSY = false
 
 end
 
@@ -469,8 +515,9 @@ end
 local function CreatePath(target)
 
 	local root = GetRoot()
+	local targetPosition = GetObjectPosition(target)
 
-	if not root or not target then
+	if not root or not targetPosition then
 		return false
 	end
 
@@ -488,7 +535,7 @@ local function CreatePath(target)
 
 		path:ComputeAsync(
 			root.Position,
-			target.Position
+			targetPosition
 		)
 
 	end)
@@ -509,10 +556,10 @@ local function CreatePath(target)
 end
 
 --==================================================
--- NEXT WAYPOINT
+-- MOVE PATH
 --==================================================
 
-local function MoveToNextWaypoint()
+local function MoveToWaypoint()
 
 	local humanoid = GetHumanoid()
 	local root = GetRoot()
@@ -521,48 +568,31 @@ local function MoveToNextWaypoint()
 		return
 	end
 
-	local waypoint = WAYPOINTS[WAYPOINT_INDEX]
+	local waypoint =
+		WAYPOINTS[WAYPOINT_INDEX]
 
 	if not waypoint then
 		return
 	end
 
-	if waypoint.Action == Enum.PathWaypointAction.Jump then
+	if waypoint.Action ==
+		Enum.PathWaypointAction.Jump then
+
 		humanoid.Jump = true
 	end
 
-	humanoid:MoveTo(waypoint.Position)
+	humanoid:MoveTo(
+		waypoint.Position
+	)
 
-	if (root.Position-waypoint.Position).Magnitude <= 3 then
+	if
+		(root.Position-waypoint.Position).Magnitude
+		<= 3
+	then
+
 		WAYPOINT_INDEX += 1
+
 	end
-
-end
-
---==================================================
--- TARGET REACHED
---==================================================
-
-local function CheckTargetReached()
-
-	local root = GetRoot()
-
-	if not root or not TARGET then
-		return false
-	end
-
-	if not TARGET.Parent then
-		return true
-	end
-
-	local distance =
-		(root.Position-TARGET.Position).Magnitude
-
-	if distance <= FINAL_DISTANCE then
-		return true
-	end
-
-	return false
 end
 
 --==================================================
@@ -605,9 +635,9 @@ local function CheckStuck()
 		STUCK_TIME = 0
 		LAST_POSITION = nil
 
+		TARGET = nil
 		ClearPath()
 
-		-- Respawn khi bị kẹt quá lâu
 		local humanoid = GetHumanoid()
 
 		if humanoid then
@@ -618,7 +648,7 @@ local function CheckStuck()
 end
 
 --==================================================
--- AUTO MOVEMENT
+-- AUTO MOVE
 --==================================================
 
 local function AutoMove()
@@ -634,24 +664,35 @@ local function AutoMove()
 		return
 	end
 
-	-- Target mất / bị xoá
+	-- Target không còn tồn tại
 	if not TARGET
 		or not TARGET.Parent
 		or not IsWatermelon(TARGET) then
 
 		TARGET = FindNearestWatermelon()
-
 		ClearPath()
+
 	end
 
 	if not TARGET then
 		return
 	end
 
-	local distance =
-		(TARGET.Position-root.Position).Magnitude
+	local targetPosition =
+		GetObjectPosition(TARGET)
 
-	-- Đã tới
+	if not targetPosition then
+
+		TARGET = nil
+		ClearPath()
+
+		return
+	end
+
+	local distance =
+		(root.Position-targetPosition).Magnitude
+
+	-- Đã tới dưa
 	if distance <= FINAL_DISTANCE then
 
 		TARGET = nil
@@ -660,37 +701,36 @@ local function AutoMove()
 		return
 	end
 
-	-- Gần thì đi thẳng
+	-- Khoảng cách gần
 	if distance <= DIRECT_DISTANCE then
 
-		humanoid:MoveTo(TARGET.Position)
+		humanoid:MoveTo(targetPosition)
 
 		return
 	end
 
-	-- Repath
+	-- Tạo lại path
 	if os.clock()-LAST_REPATH >= REPATH_TIME then
 
 		LAST_REPATH = os.clock()
 
-		if not PATH or WAYPOINT_INDEX > #WAYPOINTS then
+		if not PATH
+			or WAYPOINT_INDEX > #WAYPOINTS then
 
 			CreatePath(TARGET)
 
 		end
-
 	end
 
-	-- Pathfinding
 	if #WAYPOINTS > 0
 		and WAYPOINT_INDEX <= #WAYPOINTS then
 
-		MoveToNextWaypoint()
+		MoveToWaypoint()
 
 	else
 
-		-- fallback
-		humanoid:MoveTo(TARGET.Position)
+		-- Fallback nếu path không tạo được
+		humanoid:MoveTo(targetPosition)
 
 	end
 end
@@ -711,14 +751,15 @@ AutoButton.MouseButton1Click:Connect(function()
 
 	if AUTO_ENABLED then
 
-		AutoButton.Text = "🤖 Auto tìm dưa : ON"
+		AutoButton.Text =
+			"🤖 Auto tìm dưa : ON"
 
 	else
 
-		AutoButton.Text = "🤖 Auto tìm dưa : OFF"
+		AutoButton.Text =
+			"🤖 Auto tìm dưa : OFF"
 
 	end
-
 end)
 
 --==================================================
@@ -750,11 +791,13 @@ SpeedButton.MouseButton1Click:Connect(function()
 
 	if SPEED_ENABLED then
 
-		SpeedButton.Text = "🚀 Speed Boost : ON"
+		SpeedButton.Text =
+			"🚀 Speed Boost : ON"
 
 	else
 
-		SpeedButton.Text = "🚀 Speed Boost : OFF"
+		SpeedButton.Text =
+			"🚀 Speed Boost : OFF"
 
 	end
 
@@ -768,11 +811,12 @@ end)
 
 local function UpdateSubSpeed()
 
-	SUB_SPEED = math.clamp(
-		SUB_SPEED,
-		1,
-		100
-	)
+	SUB_SPEED =
+		math.clamp(
+			SUB_SPEED,
+			1,
+			100
+		)
 
 	SubSpeedButton.Text =
 		"🔢 SubSpeed : "..SUB_SPEED
@@ -854,20 +898,24 @@ local elapsed = 0
 RunService.Heartbeat:Connect(function(delta)
 
 	if AUTO_ENABLED then
+
 		AutoMove()
 
 		elapsed += delta
 
 		if elapsed >= 0.25 then
+
 			elapsed = 0
 			CheckStuck()
+
 		end
+
 	end
 
 end)
 
 --==================================================
--- ESP REFRESH
+-- RED DOT REFRESH
 --==================================================
 
 task.spawn(function()
@@ -877,7 +925,7 @@ task.spawn(function()
 		task.wait(1)
 
 		if ESP_ENABLED then
-			UpdateESP()
+			UpdateLocator()
 		end
 
 	end
@@ -885,7 +933,7 @@ task.spawn(function()
 end)
 
 --==================================================
--- CLEAN TARGET WHEN OBJECT DISAPPEARS
+-- TARGET REMOVED
 --==================================================
 
 workspace.DescendantRemoving:Connect(function(object)
@@ -899,9 +947,5 @@ workspace.DescendantRemoving:Connect(function(object)
 
 end)
 
---==================================================
--- INITIAL
---==================================================
-
-print("🍉 Sarry Hub V1 loaded")
+print("🍉 SARRY HUB V1 loaded")
 print("by sarry_fixe")
