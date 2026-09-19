@@ -1,13 +1,13 @@
 --==================================================
 -- 🍉 SARRY HUB V1
 -- by sarry_fixe
--- ROBLOX STUDIO - ONE SCRIPT
 --==================================================
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
 local PathfindingService = game:GetService("PathfindingService")
+local Lighting = game:GetService("Lighting")
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -21,6 +21,7 @@ local AVATAR_ID = "rbxassetid://127272362394063"
 local ESP_ENABLED = false
 local AUTO_ENABLED = false
 local SPEED_ENABLED = false
+local DARK_ENABLED = false
 
 local SUB_SPEED = 30
 local DEFAULT_SPEED = 16
@@ -42,6 +43,53 @@ local DIRECT_DISTANCE = 6
 local FINAL_DISTANCE = 2.5
 
 --==================================================
+-- SAVE LIGHTING
+--==================================================
+
+local OldLighting = {
+	Brightness = Lighting.Brightness,
+	Ambient = Lighting.Ambient,
+	OutdoorAmbient = Lighting.OutdoorAmbient,
+	ExposureCompensation = Lighting.ExposureCompensation,
+	FogColor = Lighting.FogColor,
+	FogStart = Lighting.FogStart,
+	FogEnd = Lighting.FogEnd
+}
+
+--==================================================
+-- DARK MAP
+--==================================================
+
+local function SetDarkMap(enabled)
+
+	DARK_ENABLED = enabled
+
+	if enabled then
+
+		Lighting.Brightness = 0
+		Lighting.Ambient = Color3.fromRGB(0,0,0)
+		Lighting.OutdoorAmbient = Color3.fromRGB(0,0,0)
+		Lighting.ExposureCompensation = -5
+
+		Lighting.FogColor = Color3.fromRGB(0,0,0)
+		Lighting.FogStart = 0
+		Lighting.FogEnd = 100000
+
+	else
+
+		Lighting.Brightness = OldLighting.Brightness
+		Lighting.Ambient = OldLighting.Ambient
+		Lighting.OutdoorAmbient = OldLighting.OutdoorAmbient
+		Lighting.ExposureCompensation = OldLighting.ExposureCompensation
+
+		Lighting.FogColor = OldLighting.FogColor
+		Lighting.FogStart = OldLighting.FogStart
+		Lighting.FogEnd = OldLighting.FogEnd
+
+	end
+end
+
+--==================================================
 -- GUI
 --==================================================
 
@@ -56,8 +104,8 @@ Gui.Parent = PlayerGui
 
 local Menu = Instance.new("Frame")
 Menu.Name = "Menu"
-Menu.Size = UDim2.fromOffset(340,430)
-Menu.Position = UDim2.new(0.5,-170,0.5,-215)
+Menu.Size = UDim2.fromOffset(340,500)
+Menu.Position = UDim2.new(0.5,-170,0.5,-250)
 Menu.BackgroundColor3 = Color3.fromRGB(24,24,29)
 Menu.BorderSizePixel = 0
 Menu.Parent = Gui
@@ -124,7 +172,6 @@ local function MakeDraggable(object)
 		end
 
 	end)
-
 end
 
 MakeDraggable(Menu)
@@ -212,15 +259,18 @@ local SpeedButton =
 	CreateButton("🚀 Speed Boost : OFF",205)
 
 local SubSpeedButton =
-	CreateButton("🔢 SubSpeed : "..SUB_SPEED,265)
+	CreateButton("🔢 SubSpeed : 30",265)
+
+local DarkButton =
+	CreateButton("🌑 Dark Map : OFF",325)
 
 --==================================================
--- SUB SPEED BUTTONS
+-- SUB SPEED
 --==================================================
 
 local MinusButton = Instance.new("TextButton")
 MinusButton.Size = UDim2.fromOffset(55,42)
-MinusButton.Position = UDim2.fromOffset(15,330)
+MinusButton.Position = UDim2.fromOffset(15,395)
 MinusButton.BackgroundColor3 = Color3.fromRGB(48,48,57)
 MinusButton.Text = "−"
 MinusButton.TextColor3 = Color3.new(1,1,1)
@@ -230,7 +280,7 @@ MinusButton.Parent = Menu
 
 local PlusButton = Instance.new("TextButton")
 PlusButton.Size = UDim2.fromOffset(55,42)
-PlusButton.Position = UDim2.new(1,-70,0,330)
+PlusButton.Position = UDim2.new(1,-70,0,395)
 PlusButton.BackgroundColor3 = Color3.fromRGB(48,48,57)
 PlusButton.Text = "+"
 PlusButton.TextColor3 = Color3.new(1,1,1)
@@ -271,13 +321,17 @@ AvatarStroke.Parent = Avatar
 MakeDraggable(Avatar)
 
 HideButton.MouseButton1Click:Connect(function()
+
 	Menu.Visible = false
 	Avatar.Visible = true
+
 end)
 
 Avatar.MouseButton1Click:Connect(function()
+
 	Menu.Visible = true
 	Avatar.Visible = false
+
 end)
 
 --==================================================
@@ -372,9 +426,22 @@ LocatorFolder.Parent = Gui
 local function ClearLocator()
 
 	for _,object in ipairs(LocatorFolder:GetChildren()) do
+
 		object:Destroy()
+
 	end
 
+	-- Xóa attachment cũ nếu còn
+	for _,object in ipairs(workspace:GetDescendants()) do
+
+		if object:IsA("Attachment")
+			and object.Name == "SarryRedDot" then
+
+			object:Destroy()
+
+		end
+
+	end
 end
 
 local function CreateRedDot(object)
@@ -444,12 +511,16 @@ ESPButton.MouseButton1Click:Connect(function()
 
 	if ESP_ENABLED then
 
-		ESPButton.Text = "🍉 ESP Dưa hấu : ON"
+		ESPButton.Text =
+			"🍉 ESP Dưa hấu : ON"
+
 		UpdateLocator()
 
 	else
 
-		ESPButton.Text = "🍉 ESP Dưa hấu : OFF"
+		ESPButton.Text =
+			"🍉 ESP Dưa hấu : OFF"
+
 		ClearLocator()
 
 	end
@@ -475,7 +546,8 @@ local function FindNearestWatermelon()
 
 		if IsWatermelon(object) then
 
-			local position = GetObjectPosition(object)
+			local position =
+				GetObjectPosition(object)
 
 			if position then
 
@@ -488,7 +560,6 @@ local function FindNearestWatermelon()
 					closest = object
 
 				end
-
 			end
 		end
 	end
@@ -515,21 +586,23 @@ end
 local function CreatePath(target)
 
 	local root = GetRoot()
-	local targetPosition = GetObjectPosition(target)
+	local targetPosition =
+		GetObjectPosition(target)
 
 	if not root or not targetPosition then
 		return false
 	end
 
-	local path = PathfindingService:CreatePath({
+	local path =
+		PathfindingService:CreatePath({
 
-		AgentRadius = 2,
-		AgentHeight = 5,
-		AgentCanJump = true,
-		AgentCanClimb = true,
-		WaypointSpacing = 3
+			AgentRadius = 2,
+			AgentHeight = 5,
+			AgentCanJump = true,
+			AgentCanClimb = true,
+			WaypointSpacing = 3
 
-	})
+		})
 
 	local success = pcall(function()
 
@@ -579,6 +652,7 @@ local function MoveToWaypoint()
 		Enum.PathWaypointAction.Jump then
 
 		humanoid.Jump = true
+
 	end
 
 	humanoid:MoveTo(
@@ -664,7 +738,6 @@ local function AutoMove()
 		return
 	end
 
-	-- Target không còn tồn tại
 	if not TARGET
 		or not TARGET.Parent
 		or not IsWatermelon(TARGET) then
@@ -692,7 +765,6 @@ local function AutoMove()
 	local distance =
 		(root.Position-targetPosition).Magnitude
 
-	-- Đã tới dưa
 	if distance <= FINAL_DISTANCE then
 
 		TARGET = nil
@@ -701,7 +773,6 @@ local function AutoMove()
 		return
 	end
 
-	-- Khoảng cách gần
 	if distance <= DIRECT_DISTANCE then
 
 		humanoid:MoveTo(targetPosition)
@@ -709,7 +780,6 @@ local function AutoMove()
 		return
 	end
 
-	-- Tạo lại path
 	if os.clock()-LAST_REPATH >= REPATH_TIME then
 
 		LAST_REPATH = os.clock()
@@ -729,7 +799,6 @@ local function AutoMove()
 
 	else
 
-		-- Fallback nếu path không tạo được
 		humanoid:MoveTo(targetPosition)
 
 	end
@@ -865,6 +934,30 @@ SubSpeedButton.MouseButton1Click:Connect(function()
 end)
 
 --==================================================
+-- 🌑 DARK MAP BUTTON
+--==================================================
+
+DarkButton.MouseButton1Click:Connect(function()
+
+	DARK_ENABLED = not DARK_ENABLED
+
+	SetDarkMap(DARK_ENABLED)
+
+	if DARK_ENABLED then
+
+		DarkButton.Text =
+			"🌑 Dark Map : ON"
+
+	else
+
+		DarkButton.Text =
+			"🌑 Dark Map : OFF"
+
+	end
+
+end)
+
+--==================================================
 -- RESPAWN
 --==================================================
 
@@ -882,9 +975,20 @@ Player.CharacterAdded:Connect(function(character)
 	task.wait(0.5)
 
 	if SPEED_ENABLED then
-		humanoid.WalkSpeed = SUB_SPEED
+
+		humanoid.WalkSpeed =
+			SUB_SPEED
+
 	else
-		humanoid.WalkSpeed = DEFAULT_SPEED
+
+		humanoid.WalkSpeed =
+			DEFAULT_SPEED
+
+	end
+
+	-- Giữ Dark Map sau respawn
+	if DARK_ENABLED then
+		SetDarkMap(true)
 	end
 
 end)
@@ -942,6 +1046,23 @@ workspace.DescendantRemoving:Connect(function(object)
 
 		TARGET = nil
 		ClearPath()
+
+	end
+
+end)
+
+--==================================================
+-- CLEANUP
+--==================================================
+
+Gui.AncestryChanged:Connect(function(_,parent)
+
+	if not parent then
+
+		ClearLocator()
+
+		-- Trả Lighting về ban đầu
+		SetDarkMap(false)
 
 	end
 
