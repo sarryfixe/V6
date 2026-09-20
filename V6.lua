@@ -104,7 +104,7 @@ Gui.Parent = PlayerGui
 
 local Menu = Instance.new("Frame")
 Menu.Name = "Menu"
-Menu.Size = UDim2.fromOffset(140,300)
+Menu.Size = UDim2.fromOffset(340,500)
 Menu.Position = UDim2.new(0.5,-170,0.5,-250)
 Menu.BackgroundColor3 = Color3.fromRGB(24,24,29)
 Menu.BorderSizePixel = 0
