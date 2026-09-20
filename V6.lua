@@ -104,7 +104,7 @@ Gui.Parent = PlayerGui
 
 local Menu = Instance.new("Frame")
 Menu.Name = "Menu"
-Menu.Size = UDim2.fromOffset(340,500)
+Menu.Size = UDim2.fromOffset(140,300)
 Menu.Position = UDim2.new(0.5,-170,0.5,-250)
 Menu.BackgroundColor3 = Color3.fromRGB(24,24,29)
 Menu.BorderSizePixel = 0
@@ -306,7 +306,7 @@ Avatar.Size = UDim2.fromOffset(90,90)
 Avatar.Position = UDim2.new(0,20,0.5,-45)
 Avatar.BackgroundColor3 = Color3.fromRGB(25,25,30)
 Avatar.Image = AVATAR_ID
-Avatar.Visible = false
+Avatar.Visible = true
 Avatar.Parent = Gui
 
 local AvatarCorner = Instance.new("UICorner")
@@ -884,7 +884,7 @@ local function UpdateSubSpeed()
 		math.clamp(
 			SUB_SPEED,
 			1,
-			100
+			1000
 		)
 
 	SubSpeedButton.Text =
@@ -900,7 +900,7 @@ MinusButton.MouseButton1Click:Connect(function()
 		math.clamp(
 			SUB_SPEED-1,
 			1,
-			100
+			1000
 		)
 
 	UpdateSubSpeed()
@@ -913,7 +913,7 @@ PlusButton.MouseButton1Click:Connect(function()
 		math.clamp(
 			SUB_SPEED+1,
 			1,
-			100
+			1000
 		)
 
 	UpdateSubSpeed()
@@ -926,7 +926,7 @@ SubSpeedButton.MouseButton1Click:Connect(function()
 		math.clamp(
 			SUB_SPEED+5,
 			1,
-			100
+			1000
 		)
 
 	UpdateSubSpeed()
